@@ -2,7 +2,7 @@ import { Suspense, useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { Line, Html, useGLTF } from '@react-three/drei'
 import { Vector3, Box3, type Group } from 'three'
-import { positionAt, sampleOrbit } from '../lib/orbital'
+import { positionAt, sampleOrbit, SCENE_EARTH_RADIUS } from '../lib/orbital'
 import { simClock } from '../lib/simClock'
 import type { SatelliteEntry } from '../data/satellites'
 
@@ -19,21 +19,33 @@ interface Props {
  * distance from it — then clamp that to a world-unit floor and ceiling so it
  * never gets too small (vanishing) or too big (dominating the view):
  *
- *   targetWorldSize = clamp(APPARENT_FACTOR · distance, baseSize, MAX_WORLD_SIZE)
+ *   targetWorldSize = clamp(APPARENT_FACTOR · distance, baseSize, cap)
  *   scale           = targetWorldSize / baseSize
  *
  * - Up close (distance · APPARENT_FACTOR < baseSize) it sits at its true size.
  * - Across the mid/overview range it tracks a constant apparent size.
- * - Far out it caps at MAX_WORLD_SIZE so it can't balloon.
+ * - Far out it caps so it can't balloon.
+ *
+ * The ceiling `cap` is the smaller of a global limit and a per-satellite
+ * clearance limit: a low-orbit satellite sits only a sliver above the Earth
+ * sphere, so we bound the model so its half-extent can't reach the surface
+ * (CLEARANCE_FRACTION of the altitude is the most the model half-size may
+ * occupy). This keeps high satellites large while stopping low ones from
+ * clipping into the globe.
  */
 const APPARENT_FACTOR = 0.04
 const MAX_WORLD_SIZE = 0.75
+const CLEARANCE_FRACTION = 0.6
 
-function zoomScaleFor(distance: number, baseSize: number): number {
-  const target = Math.min(
-    MAX_WORLD_SIZE,
-    Math.max(baseSize, APPARENT_FACTOR * distance),
-  )
+function zoomScaleFor(
+  distance: number,
+  baseSize: number,
+  altitude: number,
+): number {
+  // Largest model size whose half-extent stays clear of the Earth surface.
+  const clearanceCap = Math.max(0, altitude) * CLEARANCE_FRACTION * 2
+  const cap = Math.min(MAX_WORLD_SIZE, clearanceCap)
+  const target = Math.min(cap, Math.max(baseSize, APPARENT_FACTOR * distance))
   return target / baseSize
 }
 
@@ -82,9 +94,12 @@ export function SatelliteObject({ sat, selected, onSelect }: Props) {
     const p = positionAt(sat.satrec, simClock.date, scratch)
     if (!p) return
     groupRef.current.position.copy(p)
-    // Grow the model as the camera pulls away so it stays visible, capped.
+    // Grow the model as the camera pulls away so it stays visible, capped — and
+    // bounded by the satellite's clearance above the surface so it can't clip
+    // into the globe.
     const dist = state.camera.position.distanceTo(p)
-    groupRef.current.scale.setScalar(zoomScaleFor(dist, size))
+    const altitude = p.length() - SCENE_EARTH_RADIUS
+    groupRef.current.scale.setScalar(zoomScaleFor(dist, size, altitude))
   })
 
   return (

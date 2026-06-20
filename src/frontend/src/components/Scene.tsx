@@ -8,7 +8,7 @@ import { CameraRig } from './CameraRig'
 import { SCENE_EARTH_RADIUS, maxOrbitRadiusScene } from '../lib/orbital'
 import { sunDirection } from '../lib/sun'
 import { simClock } from '../lib/simClock'
-import { SATELLITES } from '../data/satellites'
+import type { SatelliteEntry } from '../data/satellites'
 
 /** Vertical field of view (deg) of the scene camera — kept in sync with the
  * <Canvas camera> below and used to compute a framing distance. */
@@ -59,21 +59,22 @@ function SunLight() {
 }
 
 interface Props {
+  satellites: SatelliteEntry[]
   selectedId: string | null
   onSelect: (id: string | null) => void
   shadingOn: boolean
 }
 
-export function Scene({ selectedId, onSelect, shadingOn }: Props) {
-  const satellites = SATELLITES.filter((s) => !s.error)
-  const selected = SATELLITES.find((s) => s.id === selectedId) ?? null
+export function Scene({ satellites, selectedId, onSelect, shadingOn }: Props) {
+  const renderable = satellites.filter((s) => !s.error)
+  const selected = satellites.find((s) => s.id === selectedId) ?? null
 
   // Default camera distance: frame the highest-altitude orbit so every orbit is
   // visible at the default zoom. We fit the apogee sphere of radius `maxR` into
   // the vertical FOV (distance = R / sin(halfFov)) with a small margin, and
   // never come closer than the old Earth-overview distance.
   const maxR = maxOrbitRadiusScene(
-    satellites.map((s) => s.satrec),
+    renderable.map((s) => s.satrec),
     simClock.date,
   )
   const halfFov = ((CAMERA_FOV / 2) * Math.PI) / 180
@@ -103,7 +104,7 @@ export function Scene({ selectedId, onSelect, shadingOn }: Props) {
         <Earth shadingOn={shadingOn} />
       </Suspense>
 
-      {satellites.map((sat) => (
+      {renderable.map((sat) => (
         <SatelliteObject
           key={sat.id}
           sat={sat}

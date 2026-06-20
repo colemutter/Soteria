@@ -12,6 +12,11 @@ summaries, alerts, scales, and chart-ready feeds. Use `/json/` when you need
 lower-level measurement feeds such as GOES X-rays, GOES protons, RTSW magnetic
 field/plasma, active regions, and aurora grids.
 
+For satellite operation protection, pair this API reference with
+[NOAA API Mappings For Satellite Operation Protection](./noaa-satellite-protection-api-mappings.md).
+That companion guide maps endpoints and fields to derived features, spacecraft
+hazards, and operator-facing alert semantics.
+
 ## Evidence Check
 
 | Claim | Verdict | Evidence | Confidence |

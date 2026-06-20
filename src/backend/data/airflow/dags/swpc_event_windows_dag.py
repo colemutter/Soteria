@@ -1,4 +1,10 @@
-from __future__ import annotations
+from include.supabase_swpc_writer import SupabaseSwpcWriter
+from include.swpc.event_windows import (
+    EVENT_WINDOW_PRODUCT_TYPES,
+    derive_space_weather_event_windows,
+    summarize_event_windows,
+)
+
 
 import datetime as dt
 import sys
@@ -11,17 +17,12 @@ AIRFLOW_ROOT = Path(__file__).resolve().parents[1]
 if str(AIRFLOW_ROOT) not in sys.path:
     sys.path.insert(0, str(AIRFLOW_ROOT))
 
-from include.supabase_swpc_writer import SupabaseSwpcWriter
-from include.swpc.event_windows import (
-    EVENT_WINDOW_PRODUCT_TYPES,
-    derive_space_weather_event_windows,
-    summarize_event_windows,
-)
+
 
 
 @dag(
     dag_id="swpc_event_window_etl",
-    schedule="*/5 * * * *",
+    schedule=None,
     start_date=pendulum.datetime(2026, 1, 1, tz="UTC"),
     catchup=False,
     max_active_runs=1,

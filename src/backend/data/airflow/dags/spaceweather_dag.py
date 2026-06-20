@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pendulum
 from airflow.decorators import dag, task
+from airflow.providers.standard.operators.trigger_dagrun import TriggerDagRunOperator
 
 AIRFLOW_ROOT = Path(__file__).resolve().parents[1]
 if str(AIRFLOW_ROOT) not in sys.path:
@@ -18,11 +19,11 @@ from include.swpc.pipeline import ingest_endpoint, summarize_ingest
 
 @dag(
     dag_id="swpc_realtime_etl",
-    schedule="* * * * *",
+    schedule="*/10 * * * *",
     start_date=pendulum.datetime(2026, 1, 1, tz="UTC"),
     catchup=False,
     max_active_runs=1,
-    dagrun_timeout=dt.timedelta(seconds=55),
+    dagrun_timeout=dt.timedelta(minutes=9),
     default_args={"retries": 2, "retry_delay": dt.timedelta(seconds=10)},
     tags=["swpc", "space-weather", "near-real-time"],
 )
@@ -59,7 +60,16 @@ def swpc_realtime_etl():
     endpoints = load_endpoint_config()
     ingest_results = ingest_swpc_endpoint.expand(endpoint=endpoints)
     current_state = publish_current_state(ingest_results)
-    emit_scale_transition_alerts(current_state)
+    alert_task = emit_scale_transition_alerts(current_state)
+    derive_event_windows = TriggerDagRunOperator(
+        task_id="trigger_event_window_etl",
+        trigger_dag_id="swpc_event_window_etl",
+        trigger_run_id="swpc_event_window__{{ run_id }}",
+        conf={"source_dag_run_id": "{{ run_id }}"},
+        reset_dag_run=True,
+        wait_for_completion=False,
+    )
+    alert_task >> derive_event_windows
 
 
 dag = swpc_realtime_etl()

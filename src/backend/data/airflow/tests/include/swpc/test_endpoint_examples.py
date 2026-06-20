@@ -20,7 +20,7 @@ from include.swpc.endpoints import (  # noqa: E402
     MINIMAL_PROTECTION_ENDPOINTS,
     SWPC_ENDPOINTS,
 )
-from util.classifier import classify_endpoint, classify_rows, normalize_payload  # noqa: E402
+from classifier import classify_endpoint, classify_rows, normalize_payload  # noqa: E402
 
 
 def _official_scale_summary(endpoint: str, payload: Any) -> list[dict[str, Any]]:

@@ -11,7 +11,6 @@ from include.swpc.fetch import (
     fetch_swpc_endpoint_json,
 )
 from include.swpc.forecast_records import normalize_forecast_records
-from include.swpc.schema import setup_swpc_schema
 
 
 class SwpcWriter(Protocol):
@@ -50,10 +49,6 @@ class EndpointIngestSummary:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
-
-
-def setup_database(writer: Any) -> None:
-    setup_swpc_schema(writer)
 
 
 def ingest_endpoint(
@@ -141,6 +136,5 @@ __all__ = [
     "EndpointIngestSummary",
     "ingest_all_endpoints",
     "ingest_endpoint",
-    "setup_database",
     "summarize_ingest",
 ]

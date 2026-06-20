@@ -11,9 +11,9 @@ AIRFLOW_ROOT = Path(__file__).resolve().parents[1]
 if str(AIRFLOW_ROOT) not in sys.path:
     sys.path.insert(0, str(AIRFLOW_ROOT))
 
-from include.neon_db_writer import NeonDbWriter
+from include.supabase_swpc_writer import SupabaseSwpcWriter
 from include.swpc.endpoints import SWPC_ENDPOINTS
-from include.swpc.pipeline import ingest_endpoint, setup_database, summarize_ingest
+from include.swpc.pipeline import ingest_endpoint, summarize_ingest
 
 
 @dag(
@@ -28,12 +28,6 @@ from include.swpc.pipeline import ingest_endpoint, setup_database, summarize_ing
 )
 def swpc_realtime_etl():
     @task
-    def setup_swpc_database() -> str:
-        writer = NeonDbWriter()
-        setup_database(writer)
-        return "ready"
-
-    @task
     def load_endpoint_config() -> list[dict[str, object]]:
         return [
             {
@@ -47,7 +41,7 @@ def swpc_realtime_etl():
 
     @task(pool="swpc_http")
     def ingest_swpc_endpoint(endpoint: dict[str, object]) -> dict[str, object]:
-        writer = NeonDbWriter()
+        writer = SupabaseSwpcWriter()
         return ingest_endpoint(writer, endpoint).to_dict()
 
     @task
@@ -62,10 +56,8 @@ def swpc_realtime_etl():
         # Alert only on scale transitions, not every minute.
         print(current_state)
 
-    database_ready = setup_swpc_database()
     endpoints = load_endpoint_config()
     ingest_results = ingest_swpc_endpoint.expand(endpoint=endpoints)
-    database_ready >> ingest_results
     current_state = publish_current_state(ingest_results)
     emit_scale_transition_alerts(current_state)
 

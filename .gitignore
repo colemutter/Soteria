@@ -22,6 +22,10 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
+# Supabase CLI local metadata
+supabase/.temp/
+**/supabase/.temp/
+
 # JavaScript/TypeScript
 node_modules/
 dist/

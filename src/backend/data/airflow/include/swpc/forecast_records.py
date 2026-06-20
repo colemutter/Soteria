@@ -5,20 +5,10 @@ import hashlib
 import json
 import math
 import re
-import sys
 from collections.abc import Mapping, Sequence
-from pathlib import Path
 from typing import Any
 
-
-try:
-    from util.classifier import classify_g, normalize_payload
-except ModuleNotFoundError:
-    data_root = Path(__file__).resolve().parents[3]
-    if str(data_root) not in sys.path:
-        sys.path.insert(0, str(data_root))
-    from util.classifier import classify_g, normalize_payload
-
+from include.swpc.classifier import classify_g, normalize_payload
 
 JsonObject = Mapping[str, Any]
 RawPayload = JsonObject | Sequence[Any]

@@ -121,14 +121,14 @@ class CommandPolicyTest(unittest.TestCase):
         self.assertTrue(decision.human_review_required)
         self.assertEqual(decision.risk_level, CommandPolicyRiskLevel.MEDIUM)
 
-    def test_adcs_degradation_selects_sunsafe(self) -> None:
+    def test_adcs_degradation_selects_sunsafe_and_commandability_check(self) -> None:
         decision = recommend_command_policy_for_finding(
             finding(SatelliteOutcome.STAR_TRACKER_DEGRADED),
         )
 
         self.assertEqual(
             [selection.catalog_command_id for selection in decision.selected_commands],
-            ["adcs_set_sunsafe"],
+            ["adcs_set_sunsafe", "cfs_noop"],
         )
         self.assertTrue(decision.human_review_required)
         self.assertEqual(decision.risk_level, CommandPolicyRiskLevel.HIGH)

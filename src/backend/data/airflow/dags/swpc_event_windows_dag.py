@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from include.supabase_swpc_writer import SupabaseSwpcWriter
 from include.swpc.event_windows import (
     EVENT_WINDOW_PRODUCT_TYPES,
@@ -22,7 +24,7 @@ if str(AIRFLOW_ROOT) not in sys.path:
 
 @dag(
     dag_id="swpc_event_window_etl",
-    schedule=None,
+    schedule="*/5 * * * *",
     start_date=pendulum.datetime(2026, 1, 1, tz="UTC"),
     catchup=False,
     max_active_runs=1,

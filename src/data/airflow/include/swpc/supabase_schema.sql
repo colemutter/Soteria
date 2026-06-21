@@ -73,6 +73,7 @@ CREATE TABLE IF NOT EXISTS public.space_weather_event_windows (
     units TEXT,
     confidence TEXT NOT NULL,
     status TEXT NOT NULL,
+    demo BOOLEAN NOT NULL DEFAULT false,
     evidence JSONB NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),

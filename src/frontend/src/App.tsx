@@ -159,19 +159,20 @@ function App() {
     let active = true
     const load = async () => {
       try {
-        const next = await fetchSatelliteAlerts()
+        const next = await fetchSatelliteAlerts(demoOn)
         if (active) setAlerts(next)
       } catch (e) {
         console.error('[alerts] fetch failed', e)
       }
     }
+    setAlerts([])
     void load()
     const id = setInterval(() => void load(), ALERTS_REFRESH_MS)
     return () => {
       active = false
       clearInterval(id)
     }
-  }, [])
+  }, [demoOn])
 
   // Highest danger level per satellite, derived from its alerts.
   const dangerById = useMemo(() => {

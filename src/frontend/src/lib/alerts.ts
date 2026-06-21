@@ -143,12 +143,14 @@ type RunbookRow = {
   metadata: Record<string, unknown> | null
   created_at: string | null
   event_window_id: string | null
+  demo: boolean | null
 }
 
 type ReportRow = {
   id: string
   report_json: Record<string, unknown> | null
   created_at: string | null
+  demo: boolean | null
 }
 
 function asArray(value: unknown): Record<string, unknown>[] {
@@ -282,7 +284,7 @@ const REPORT_LIMIT = 50
  * problems for satellites that don't have a runbook yet. Returns [] when
  * Supabase isn't configured or on error (the HUD just shows no alerts).
  */
-export async function fetchSatelliteAlerts(): Promise<SatelliteAlert[]> {
+export async function fetchSatelliteAlerts(demo = false): Promise<SatelliteAlert[]> {
   if (!supabase) {
     warnNoSupabaseOnce()
     return []
@@ -292,13 +294,15 @@ export async function fetchSatelliteAlerts(): Promise<SatelliteAlert[]> {
     supabase
       .from('command_runbooks')
       .select(
-        'id,satellite_external_id,title,summary,commands,risk_level,metadata,created_at,event_window_id',
+        'id,satellite_external_id,title,summary,commands,risk_level,metadata,created_at,event_window_id,demo',
       )
+      .eq('demo', demo)
       .order('created_at', { ascending: false })
       .limit(RUNBOOK_LIMIT),
     supabase
       .from('satellite_event_reports')
-      .select('id,report_json,created_at')
+      .select('id,report_json,created_at,demo')
+      .eq('demo', demo)
       .order('created_at', { ascending: false })
       .limit(REPORT_LIMIT),
   ])

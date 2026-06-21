@@ -25,7 +25,7 @@ SATELLITE_COLUMNS = (
 RUNBOOK_COLUMNS = (
     "id,report_id,event_window_id,satellite_id,satellite_external_id,"
     "catalog_version,policy_version,evidence_hash,dedupe_key,title,summary,"
-    "commands,risk_level,status,source,metadata,created_at,updated_at"
+    "commands,risk_level,status,source,demo,metadata,created_at,updated_at"
 )
 def _get_supabase_client() -> Any:
     url = os.getenv("SUPABASE_URL")
@@ -112,6 +112,7 @@ class CommandRunbookPayload(BaseModel):
     risk_level: str = "unknown"
     status: str | None = None
     source: str | None = None
+    demo: bool = False
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 

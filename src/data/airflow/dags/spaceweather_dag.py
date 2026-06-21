@@ -24,7 +24,7 @@ RETRIES = 2
 
 @dag(
     dag_id="swpc_realtime_etl",
-    schedule=dt.timedelta(hours=10),
+    schedule=dt.timedelta(hours=2),
     start_date=pendulum.datetime(2026, 1, 1, tz="UTC"),
     catchup=False,
     max_active_runs=1,

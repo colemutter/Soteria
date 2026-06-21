@@ -133,6 +133,22 @@ class CommandPolicyTest(unittest.TestCase):
         self.assertTrue(decision.human_review_required)
         self.assertEqual(decision.risk_level, CommandPolicyRiskLevel.HIGH)
 
+    def test_upper_leo_adcs_degradation_selects_passive(self) -> None:
+        decision = recommend_command_policy_for_finding(
+            finding(
+                SatelliteOutcome.ADCS_DISTURBANCE,
+                severity=ReportSeverity.MODERATE,
+            ),
+            satellite_metadata={"orbit_regime": "LEO", "altitude_km": 826.0},
+        )
+
+        self.assertEqual(
+            [selection.catalog_command_id for selection in decision.selected_commands],
+            ["adcs_set_passive"],
+        )
+        self.assertTrue(decision.human_review_required)
+        self.assertEqual(decision.risk_level, CommandPolicyRiskLevel.MEDIUM)
+
     def test_orbit_drag_selects_commandability_check(self) -> None:
         decision = recommend_command_policy_for_finding(
             finding(SatelliteOutcome.INCREASED_DRAG),
@@ -164,6 +180,24 @@ class CommandPolicyTest(unittest.TestCase):
         )
         self.assertTrue(decision.human_review_required)
         self.assertEqual(decision.risk_level, CommandPolicyRiskLevel.HIGH)
+
+    def test_high_orbit_charging_and_comm_selects_commandability_check(self) -> None:
+        decision = recommend_command_policy_for_finding(
+            finding(
+                SatelliteOutcome.SURFACE_CHARGING,
+                SatelliteOutcome.DEEP_DIELECTRIC_CHARGING,
+                SatelliteOutcome.COMMUNICATION_DEGRADED,
+                severity=ReportSeverity.MINOR,
+            ),
+            satellite_metadata={"orbit_regime": "GEO", "altitude_km": 35786},
+        )
+
+        self.assertEqual(
+            [selection.catalog_command_id for selection in decision.selected_commands],
+            ["cfs_noop"],
+        )
+        self.assertFalse(decision.human_review_required)
+        self.assertEqual(decision.risk_level, CommandPolicyRiskLevel.LOW)
 
     def test_generic_radiation_protection_is_no_action(self) -> None:
         decision = recommend_command_policy_for_finding(

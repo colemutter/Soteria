@@ -220,6 +220,30 @@ class ReportGenerationTest(unittest.TestCase):
             client.query.rows[0]["dedupe_key"],
             "report:ew_123:hash_123",
         )
+        self.assertFalse(client.query.rows[0]["demo"])
+
+    def test_persist_report_run_result_marks_demo_rows(self) -> None:
+        self.patch_client([result_message(structured_report())])
+        result = asyncio.run(generate_report_from_bundle(bundle()))
+        run_result = report_generation.EventWindowReportRunResult(
+            status="completed",
+            requested_event_window_ids=["ew_123"],
+            resolved_event_window_ids=["ew_123"],
+            missing_event_window_ids=[],
+            reports=[result.report],
+            failures=[],
+            validation_errors=[],
+            session_id="session_123",
+        )
+        client = FakeSupabaseClient()
+
+        persist_report_run_result(
+            client,
+            run_result,
+            demo_event_window_ids={"ew_123"},
+        )
+
+        self.assertTrue(client.query.rows[0]["demo"])
 
 
 if __name__ == "__main__":

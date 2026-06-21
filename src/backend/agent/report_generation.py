@@ -255,7 +255,10 @@ async def generate_reports_for_event_windows(
 def persist_report_run_result(
     client: Any,
     result: EventWindowReportRunResult,
+    *,
+    demo_event_window_ids: set[str] | None = None,
 ) -> int:
+    demo_ids = set(demo_event_window_ids or set())
     rows: list[dict[str, Any]] = []
     for report in result.reports:
         rows.append(
@@ -264,6 +267,7 @@ def persist_report_run_result(
                 "event_window_id": report.event_window_id,
                 "evidence_hash": report.evidence_hash,
                 "status": "validated",
+                "demo": report.event_window_id in demo_ids,
                 "session_id": result.session_id,
                 "report_json": report.model_dump(mode="json"),
                 "failure_json": None,
@@ -280,6 +284,7 @@ def persist_report_run_result(
                 "event_window_id": failure.event_window_id,
                 "evidence_hash": None,
                 "status": "failed",
+                "demo": failure.event_window_id in demo_ids,
                 "session_id": result.session_id,
                 "report_json": None,
                 "failure_json": failure.model_dump(mode="json"),

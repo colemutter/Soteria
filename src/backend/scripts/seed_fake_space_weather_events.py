@@ -37,6 +37,7 @@ def main() -> int:
                     "event_key": row.get("event_key"),
                     "event_type": row.get("event_type"),
                     "status": row.get("status"),
+                    "demo": row.get("demo"),
                     "peak_severity": row.get("peak_severity"),
                     "window_start": row.get("window_start"),
                     "window_end": row.get("window_end"),
@@ -109,6 +110,7 @@ def fake_event_rows(now: dt.datetime, args: argparse.Namespace) -> list[dict[str
             "units": "nT",
             "confidence": "observed",
             "status": status_for(now, start, end),
+            "demo": True,
             "evidence": {
                 "fake": True,
                 "source": SCRIPT_SOURCE,
@@ -135,6 +137,7 @@ def fake_event_rows(now: dt.datetime, args: argparse.Namespace) -> list[dict[str
             "units": "Kp",
             "confidence": "forecast",
             "status": status_for(now, start, end),
+            "demo": True,
             "evidence": {
                 "fake": True,
                 "source": SCRIPT_SOURCE,
@@ -161,8 +164,11 @@ def upsert_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def upsert_rows_with_supabase_cli(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return run_supabase_sql(upsert_sql(rows))
+
+
+def run_supabase_sql(sql: str) -> list[dict[str, Any]]:
     db_url = os.environ["SUPABASE_DATABASE_URL"]
-    sql = upsert_sql(rows)
     sql_file = None
     try:
         with tempfile.NamedTemporaryFile(
@@ -200,10 +206,50 @@ def upsert_rows_with_supabase_cli(rows: list[dict[str, Any]]) -> list[dict[str, 
             f"stdout:\n{result.stdout}\n"
             f"stderr:\n{redact_secret(result.stderr, db_url)}"
         )
-    output = json.loads(result.stdout or "[]")
-    if isinstance(output, dict):
-        return [dict(row) for row in output.get("rows", [])]
-    return [dict(row) for row in output]
+    payload = parse_supabase_output(result.stdout)
+    if isinstance(payload, dict):
+        rows = payload.get("rows")
+        if isinstance(rows, list):
+            return [dict(row) for row in rows if isinstance(row, dict)]
+        return [dict(payload)]
+    if isinstance(payload, list):
+        return [dict(row) for row in payload if isinstance(row, dict)]
+    raise RuntimeError(f"Unexpected Supabase CLI response: {payload!r}")
+
+
+def parse_supabase_output(output: str) -> Any:
+    decoder = json.JSONDecoder()
+    payloads: list[Any] = []
+    index = 0
+    while index < len(output):
+        start = output.find("{", index)
+        list_start = output.find("[", index)
+        candidates = [pos for pos in (start, list_start) if pos >= 0]
+        if not candidates:
+            break
+        start = min(candidates)
+        try:
+            payload, end = decoder.raw_decode(output[start:])
+        except json.JSONDecodeError:
+            index = start + 1
+            continue
+        payloads.append(payload)
+        index = start + end
+
+    if not payloads:
+        raise RuntimeError(f"Supabase CLI did not return JSON: {output[:500]}")
+    for payload in reversed(payloads):
+        if isinstance(payload, dict) and isinstance(payload.get("rows"), list):
+            return payload
+    row_payloads = [
+        payload
+        for payload in payloads
+        if isinstance(payload, dict)
+        and not ({"advisory", "boundary", "warning"} & set(payload))
+    ]
+    if row_payloads:
+        return {"rows": row_payloads}
+    return payloads[-1]
 
 
 def upsert_sql(rows: list[dict[str, Any]]) -> str:
@@ -228,6 +274,7 @@ WITH payload AS (
         units TEXT,
         confidence TEXT,
         status TEXT,
+        demo BOOLEAN,
         evidence JSONB,
         updated_at TIMESTAMPTZ
     )
@@ -246,6 +293,7 @@ INSERT INTO public.space_weather_event_windows (
     units,
     confidence,
     status,
+    demo,
     evidence,
     updated_at
 )
@@ -263,6 +311,7 @@ SELECT
     units,
     confidence,
     status,
+    COALESCE(demo, false),
     evidence,
     updated_at
 FROM payload
@@ -279,14 +328,16 @@ ON CONFLICT (event_key) DO UPDATE SET
     units = EXCLUDED.units,
     confidence = EXCLUDED.confidence,
     status = EXCLUDED.status,
+    demo = EXCLUDED.demo,
     evidence = EXCLUDED.evidence,
     updated_at = EXCLUDED.updated_at
 RETURNING
-    id,
+    id::text AS id,
     event_key,
     event_type,
     source_product,
     status,
+    demo,
     peak_severity,
     window_start,
     window_end;

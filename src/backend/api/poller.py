@@ -23,7 +23,7 @@ logger = logging.getLogger("soteria.poller")
 EVENT_WINDOW_COLUMNS = (
     "id,event_key,event_type,source_product,source_endpoint,window_start,"
     "peak_time,window_end,peak_value,peak_severity,threshold_value,units,"
-    "confidence,status,evidence,updated_at"
+    "confidence,status,demo,evidence,updated_at"
 )
 
 
@@ -39,6 +39,7 @@ class EventWindowReactionMessage(BaseModel):
     status: str
     confidence: str
     priority: str
+    demo: bool = False
     peak_severity: int | None = None
     window_start: dt.datetime
     window_end: dt.datetime
@@ -545,6 +546,7 @@ def _reaction_message(row: dict[str, Any]) -> EventWindowReactionMessage | None:
             status=str(row["status"]),
             confidence=str(row["confidence"]),
             priority=_priority(severity),
+            demo=_optional_bool(row.get("demo")),
             peak_severity=severity,
             window_start=_require_datetime(row.get("window_start"), "window_start"),
             window_end=_require_datetime(row.get("window_end"), "window_end"),
@@ -590,6 +592,7 @@ def _fingerprint(message: EventWindowReactionMessage) -> str:
         "event_key": message.event_key,
         "status": message.status,
         "peak_severity": message.peak_severity,
+        "demo": message.demo,
         "updated_at": _iso_z(message.updated_at),
     }
     return json.dumps(stable, sort_keys=True)
@@ -614,6 +617,16 @@ def _optional_int(value: Any) -> int | None:
     if value is None:
         return None
     return int(value)
+
+
+def _optional_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return bool(value)
 
 
 def _require_datetime(value: Any, field_name: str) -> dt.datetime:

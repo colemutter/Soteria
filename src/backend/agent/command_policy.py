@@ -180,10 +180,23 @@ def recommend_command_policy_for_finding(
             )
         )
     elif _has_outcome(outcomes, SatelliteOutcome.COMMUNICATION_DEGRADED):
-        no_action_reasons.append(
-            "Communication degradation is present, but telemetry recovery or quiet "
-            "posture was not explicitly requested."
-        )
+        if _is_high_orbit(metadata):
+            selections.append(
+                _selection(
+                    "cfs_noop",
+                    command_catalog,
+                    reason=(
+                        "High-orbit charging/communications risk maps to a low-risk "
+                        "CFS commandability check before manual link-margin review."
+                    ),
+                    risk_level=CommandPolicyRiskLevel.LOW,
+                )
+            )
+        else:
+            no_action_reasons.append(
+                "Communication degradation is present, but telemetry recovery or quiet "
+                "posture was not explicitly requested."
+            )
 
     if _has_any_outcome(
         outcomes,
@@ -192,12 +205,21 @@ def recommend_command_policy_for_finding(
             SatelliteOutcome.STAR_TRACKER_DEGRADED,
         },
     ):
+        command_id = _adcs_posture_command_id(finding, metadata)
+        command_name = "sun-safe" if command_id == "adcs_set_sunsafe" else "passive"
         selections.append(
             _selection(
-                "adcs_set_sunsafe",
+                command_id,
                 command_catalog,
-                reason="ADCS/star-tracker/pointing degradation maps to catalogued sun-safe mode.",
-                risk_level=CommandPolicyRiskLevel.HIGH,
+                reason=(
+                    "ADCS/star-tracker/pointing degradation maps to catalogued "
+                    f"{command_name} mode based on severity and orbital position."
+                ),
+                risk_level=(
+                    CommandPolicyRiskLevel.HIGH
+                    if command_id == "adcs_set_sunsafe"
+                    else CommandPolicyRiskLevel.MEDIUM
+                ),
             )
         )
 
@@ -235,6 +257,18 @@ def recommend_command_policy_for_finding(
             SatelliteOutcome.SOLAR_ARRAY_DEGRADATION,
         },
     ):
+        if _is_high_orbit(metadata):
+            selections.append(
+                _selection(
+                    "cfs_noop",
+                    command_catalog,
+                    reason=(
+                        "High-orbit radiation/charging exposure maps to a low-risk "
+                        "CFS commandability check while operators inspect telemetry."
+                    ),
+                    risk_level=CommandPolicyRiskLevel.LOW,
+                )
+            )
         no_action_reasons.append(
             "Generic radiation or charging protection has no concrete executable "
             "catalog command."
@@ -448,6 +482,38 @@ def _finding_outcomes(
     report: EventWindowSatelliteReport | None,
 ) -> set[SatelliteOutcome]:
     return set(finding.possible_outcomes)
+
+
+def _adcs_posture_command_id(
+    finding: SatelliteImpactFinding,
+    metadata: Mapping[str, Any],
+) -> str:
+    altitude = _altitude_km(metadata)
+    if finding.severity in {ReportSeverity.SEVERE, ReportSeverity.EXTREME}:
+        return "adcs_set_sunsafe"
+    if finding.severity == ReportSeverity.MAJOR and (
+        altitude is None or altitude <= 600
+    ):
+        return "adcs_set_sunsafe"
+    return "adcs_set_passive"
+
+
+def _is_high_orbit(metadata: Mapping[str, Any]) -> bool:
+    regime = str(metadata.get("orbit_regime") or "").strip().upper()
+    if regime in {"MEO", "GEO", "HEO"}:
+        return True
+    altitude = _altitude_km(metadata)
+    return altitude is not None and altitude >= 2000
+
+
+def _altitude_km(metadata: Mapping[str, Any]) -> float | None:
+    value = metadata.get("altitude_km")
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _has_outcome(

@@ -429,6 +429,7 @@ def seed_validation_event_window(now: dt.datetime) -> dict:
         "units": "Kp",
         "confidence": "forecast",
         "status": "active",
+        "demo": True,
         "evidence": {
             "validation": True,
             "source": "live_poller_report_validation.py",

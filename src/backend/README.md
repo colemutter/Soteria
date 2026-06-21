@@ -3,9 +3,9 @@
 Seed two fake space-weather event windows in Supabase: one severe solar-wind
 coupling event and one severe geomagnetic storm event. Event keys are random by
 default so each run creates fresh rows. Pass `--stable-keys` to update the same
-rows by `event_key`. When `SUPABASE_DATABASE_URL` is configured, the script
-writes with `supabase db query`; otherwise it falls back to the Supabase Data
-API.
+event rows by `event_key`. The script does not create fake satellites, reports,
+or command runbooks; downstream report/runbook generation should use the active
+rows already present in `public.satellites`.
 
 ```bash
 uv run python scripts/seed_fake_space_weather_events.py
@@ -15,6 +15,22 @@ Preview the rows without writing:
 
 ```bash
 uv run python scripts/seed_fake_space_weather_events.py --dry-run
+```
+
+If older local-test runs created `soteria-fake-%` satellite rows, remove those
+demo rows deliberately with:
+
+```bash
+supabase db query --linked "
+delete from public.command_runbooks
+where satellite_external_id like 'soteria-fake-%';
+
+delete from public.satellite_event_reports
+where dedupe_key like 'local-test-command-demo-report:%';
+
+delete from public.satellites
+where external_id like 'soteria-fake-%';
+"
 ```
 
 Smoke-test deployed Render routes:

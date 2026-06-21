@@ -38,6 +38,7 @@ def generate_command_runbooks_for_report(
     report_id: str | None = None,
     event_window_id: str | None = None,
     evidence_hash: str | None = None,
+    demo: bool = False,
     satellite_metadata: Mapping[str, Mapping[str, Any] | BaseModel] | None = None,
     policy_context: Mapping[str, PolicyContextInput] | PolicyContextInput | None = None,
     catalog: CommandCatalog | None = None,
@@ -66,6 +67,8 @@ def generate_command_runbooks_for_report(
         )
         for satellite in satellites
     ]
+    for row in rows:
+        row["demo"] = demo
     return [validate_catalog_backed_runbook(row) for row in rows]
 
 
@@ -74,12 +77,14 @@ def generate_command_runbooks_for_reports(
     satellites: Sequence[SatelliteInput],
     *,
     report_ids: Mapping[str, str] | Sequence[str] | None = None,
+    demo_event_window_ids: set[str] | None = None,
     satellite_metadata: Mapping[str, Mapping[str, Any] | BaseModel] | None = None,
     policy_context: Mapping[str, PolicyContextInput] | PolicyContextInput | None = None,
     catalog: CommandCatalog | None = None,
 ) -> list[dict[str, Any]]:
     """Generate runbooks for every report and every satellite in the query scope."""
     command_catalog = catalog if catalog is not None else load_command_catalog()
+    demo_ids = set(demo_event_window_ids or set())
     rows: list[dict[str, Any]] = []
     for index, report in enumerate(reports):
         rows.extend(
@@ -87,6 +92,7 @@ def generate_command_runbooks_for_reports(
                 report,
                 satellites,
                 report_id=_report_id_for_index(report_ids, report, index),
+                demo=report.event_window_id in demo_ids,
                 satellite_metadata=satellite_metadata,
                 policy_context=policy_context,
                 catalog=command_catalog,

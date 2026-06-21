@@ -125,13 +125,21 @@ async def create_poller_report(
         session_id,
     )
     client = _get_supabase_client()
+    demo_event_window_ids = _demo_event_window_ids(reaction_batch)
     result = await generate_reports_for_event_windows(
         reaction_batch.event_window_ids,
         client=client,
         session_id=session_id,
     )
     try:
-        result.persisted_rows_count = persist_report_run_result(client, result)
+        if demo_event_window_ids:
+            result.persisted_rows_count = persist_report_run_result(
+                client,
+                result,
+                demo_event_window_ids=demo_event_window_ids,
+            )
+        else:
+            result.persisted_rows_count = persist_report_run_result(client, result)
     except Exception as exc:
         logger.exception("failed to persist poller report result: %s", exc)
         result.persistence_errors.append(str(exc))
@@ -149,6 +157,11 @@ async def create_poller_report(
             runbook_rows = generate_command_runbooks_for_reports(
                 result.reports,
                 satellite_result.satellites,
+                **(
+                    {"demo_event_window_ids": demo_event_window_ids}
+                    if demo_event_window_ids
+                    else {}
+                ),
             )
             result.runbooks_generated_count = len(runbook_rows)
             expected_runbook_count = len(result.reports) * active_satellite_count
@@ -188,6 +201,14 @@ def persist_command_runbook_rows(client, rows: list[dict]) -> int:
         .execute()
     )
     return len(response.data or rows)
+
+
+def _demo_event_window_ids(reaction_batch: EventWindowReactionBatch) -> set[str]:
+    return {
+        event_window.event_window_id
+        for event_window in reaction_batch.event_windows
+        if event_window.demo
+    }
 
 
 def _poller_report_has_pipeline_errors(result: EventWindowReportRunResult) -> bool:

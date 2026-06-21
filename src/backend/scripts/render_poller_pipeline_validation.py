@@ -234,7 +234,7 @@ def seed_validation_event_window() -> dict[str, Any]:
 insert into public.space_weather_event_windows (
   event_key, event_type, source_product, source_endpoint, window_start,
   peak_time, window_end, peak_value, peak_severity, threshold_value, units,
-  confidence, status, evidence, updated_at
+  confidence, status, demo, evidence, updated_at
 ) values (
   '{event_key}',
   'geomagnetic_storm_risk',
@@ -249,6 +249,7 @@ insert into public.space_weather_event_windows (
   'Kp',
   'forecast',
   'active',
+  true,
   jsonb_build_object(
     'validation', true,
     'source', 'render_poller_pipeline_validation.py',
@@ -257,7 +258,7 @@ insert into public.space_weather_event_windows (
   now()
 )
 returning id, event_key, event_type, source_product, status, confidence,
-          peak_severity, window_start, updated_at, window_end;
+          demo, peak_severity, window_start, updated_at, window_end;
 """
     rows = supabase_rows(sql)
     if not rows:
@@ -281,6 +282,7 @@ def post_poller_report(base_url: str, seeded_event: dict[str, Any]) -> None:
                 "source_product": seeded_event["source_product"],
                 "status": seeded_event["status"],
                 "confidence": seeded_event["confidence"],
+                "demo": bool(seeded_event.get("demo")),
                 "priority": "high",
                 "peak_severity": seeded_event["peak_severity"],
                 "window_start": iso_z(seeded_event["window_start"]),
@@ -366,7 +368,7 @@ def wait_for_pipeline_outputs(
 def query_report_rows(event_window_id: str) -> list[dict[str, Any]]:
     return supabase_rows(
         f"""
-select id, event_window_id, status, session_id, created_at
+select id, event_window_id, status, demo, session_id, created_at
 from public.satellite_event_reports
 where event_window_id = '{event_window_id}'
 order by created_at desc
@@ -379,7 +381,7 @@ def query_runbook_rows(event_window_id: str) -> list[dict[str, Any]]:
     return supabase_rows(
         f"""
 select id, report_id, event_window_id, satellite_external_id, status,
-       catalog_version, policy_version, risk_level, created_at
+       catalog_version, policy_version, risk_level, demo, created_at
 from public.command_runbooks
 where event_window_id = '{event_window_id}'
 order by created_at desc
@@ -430,7 +432,12 @@ def parse_supabase_json(output: str) -> dict[str, Any]:
     for payload in reversed(payloads):
         if isinstance(payload.get("rows"), list):
             return payload
-    return payloads[-1]
+    row_payloads = [
+        payload
+        for payload in payloads
+        if not ({"advisory", "boundary", "warning"} & set(payload))
+    ]
+    return {"rows": row_payloads}
 
 
 if __name__ == "__main__":

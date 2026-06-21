@@ -271,6 +271,112 @@ class AgentApiTest(unittest.TestCase):
         self.assertIs(persisted_client, sentinel_client)
         self.assertEqual(len(persisted_rows), 3)
 
+    def test_poller_report_endpoint_marks_demo_pipeline_rows(self) -> None:
+        original_get_client = agent_api._get_supabase_client
+        original_generator = agent_api.generate_reports_for_event_windows
+        original_persist_reports = agent_api.persist_report_run_result
+        original_query_satellites = agent_api.query_active_satellite_evidence
+        original_generate_runbooks = agent_api.generate_command_runbooks_for_reports
+        original_persist_runbooks = agent_api.persist_command_runbook_rows
+        calls = {
+            "persist_report_kwargs": [],
+            "runbook_kwargs": [],
+        }
+        report = EventWindowSatelliteReport(
+            event_window_id="ew_demo",
+            evidence_hash="hash_demo",
+            event_severity=ReportSeverity.MAJOR,
+            summary="Demo geomagnetic storm may affect payload data quality.",
+            possible_outcomes=[SatelliteOutcome.PAYLOAD_NOISE],
+            findings=[
+                SatelliteImpactFinding(
+                    satellite_id="sat-1",
+                    severity=ReportSeverity.MAJOR,
+                    possible_outcomes=[SatelliteOutcome.PAYLOAD_NOISE],
+                    rationale="Payload data quality may degrade.",
+                    source_event_window_ids=["ew_demo"],
+                    source_satellite_ids=["sat-1"],
+                )
+            ],
+            confidence="medium",
+        )
+
+        async def fake_generate_reports(event_window_ids, *, client, session_id):
+            return EventWindowReportRunResult(
+                status="completed",
+                requested_event_window_ids=event_window_ids,
+                resolved_event_window_ids=event_window_ids,
+                missing_event_window_ids=[],
+                reports=[report],
+                failures=[],
+                validation_errors=[],
+                session_id=session_id,
+            )
+
+        def fake_persist_reports(client, result, **kwargs):
+            calls["persist_report_kwargs"].append(kwargs)
+            return 1
+
+        def fake_generate_runbooks(reports, satellites, **kwargs):
+            calls["runbook_kwargs"].append(kwargs)
+            return [{"dedupe_key": "runbook:demo:sat-1", "demo": True}]
+
+        sentinel_client = object()
+        agent_api._get_supabase_client = lambda: sentinel_client
+        agent_api.generate_reports_for_event_windows = fake_generate_reports
+        agent_api.persist_report_run_result = fake_persist_reports
+        agent_api.query_active_satellite_evidence = lambda client: SimpleNamespace(
+            satellites=[{"external_id": "sat-1", "name": "DemoSat"}],
+            validation_errors=[],
+        )
+        agent_api.generate_command_runbooks_for_reports = fake_generate_runbooks
+        agent_api.persist_command_runbook_rows = lambda client, rows: len(rows)
+        try:
+            response = TestClient(app).post(
+                "/api/poller/report",
+                json={
+                    "trigger_type": "event_windows_changed",
+                    "trigger_source": "space_weather_event_windows",
+                    "priority": "high",
+                    "event_window_ids": ["ew_demo"],
+                    "event_windows": [
+                        {
+                            "event_window_id": "ew_demo",
+                            "event_key": "kp:2026-06-21T00:00:00Z",
+                            "event_type": "geomagnetic_storm_risk",
+                            "source_product": "local_test_fake_event",
+                            "status": "active",
+                            "confidence": "forecast",
+                            "priority": "high",
+                            "demo": True,
+                            "peak_severity": 4,
+                            "window_start": "2026-06-21T00:00:00Z",
+                            "window_end": "2026-06-21T02:00:00Z",
+                            "updated_at": "2026-06-21T00:05:00Z",
+                            "detected_at": "2026-06-21T00:05:01Z",
+                        }
+                    ],
+                    "detected_at": "2026-06-21T00:05:02Z",
+                },
+            )
+        finally:
+            agent_api._get_supabase_client = original_get_client
+            agent_api.generate_reports_for_event_windows = original_generator
+            agent_api.persist_report_run_result = original_persist_reports
+            agent_api.query_active_satellite_evidence = original_query_satellites
+            agent_api.generate_command_runbooks_for_reports = original_generate_runbooks
+            agent_api.persist_command_runbook_rows = original_persist_runbooks
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            calls["persist_report_kwargs"][0]["demo_event_window_ids"],
+            {"ew_demo"},
+        )
+        self.assertEqual(
+            calls["runbook_kwargs"][0]["demo_event_window_ids"],
+            {"ew_demo"},
+        )
+
     def test_poller_report_endpoint_returns_error_when_runbook_generation_fails(
         self,
     ) -> None:

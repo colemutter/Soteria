@@ -21,6 +21,23 @@ Using workdir /Users/example/Projects/Soteria
 
         self.assertEqual(parse_supabase_json(output)["rows"], [{"ok": 1}])
 
+    def test_parse_supabase_json_wraps_row_object_streams(self) -> None:
+        output = """
+Using workdir /Users/example/Projects/Soteria
+{"external_id": "soteria-render-cubesat-alpha", "name": "Alpha"}
+{"external_id": "soteria-render-cubesat-beta", "name": "Beta"}
+{"external_id": "soteria-render-cubesat-gamma", "name": "Gamma"}
+"""
+
+        self.assertEqual(
+            parse_supabase_json(output)["rows"],
+            [
+                {"external_id": "soteria-render-cubesat-alpha", "name": "Alpha"},
+                {"external_id": "soteria-render-cubesat-beta", "name": "Beta"},
+                {"external_id": "soteria-render-cubesat-gamma", "name": "Gamma"},
+            ],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

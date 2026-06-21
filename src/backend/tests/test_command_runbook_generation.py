@@ -109,8 +109,32 @@ class CommandRunbookGenerationTest(unittest.TestCase):
             self.assertEqual(row["evidence_hash"], "evidence-hash-1")
             self.assertEqual(row["policy_version"], POLICY_VERSION)
             self.assertEqual(row["source"], RUNBOOK_SOURCE)
+            self.assertFalse(row["demo"])
             self.assertTrue(row["catalog_version"])
             self.assertIn(row["satellite_external_id"], row["dedupe_key"])
+
+    def test_batch_helper_marks_demo_event_window_runbooks(self) -> None:
+        demo_report = report_with_findings(
+            finding("sat-1", SatelliteOutcome.PAYLOAD_NOISE, event_window_id="ew-demo"),
+            event_window_id="ew-demo",
+        )
+        live_report = report_with_findings(
+            finding("sat-2", SatelliteOutcome.INCREASED_DRAG, event_window_id="ew-live"),
+            event_window_id="ew-live",
+        )
+
+        rows = generate_command_runbooks_for_reports(
+            [demo_report, live_report],
+            active_satellites(),
+            demo_event_window_ids={"ew-demo"},
+        )
+
+        self.assertTrue(
+            all(row["demo"] for row in rows if row["event_window_id"] == "ew-demo")
+        )
+        self.assertTrue(
+            all(not row["demo"] for row in rows if row["event_window_id"] == "ew-live")
+        )
 
     def test_command_bearing_runbook_uses_catalog_renderer_and_provenance(self) -> None:
         report = report_with_findings(
@@ -182,6 +206,80 @@ class CommandRunbookGenerationTest(unittest.TestCase):
         self.assertFalse(no_finding["metadata"]["human_review_required"])
         self.assertEqual(no_finding["metadata"]["no_action_reason"], NO_FINDING_REASON)
         self.assertEqual(no_finding["metadata"]["findings"], [])
+
+    def test_geomagnetic_runbooks_vary_by_orbit_and_severity(self) -> None:
+        report = report_with_findings(
+            finding(
+                "low-leo",
+                SatelliteOutcome.ADCS_DISTURBANCE,
+                SatelliteOutcome.INCREASED_DRAG,
+                severity=ReportSeverity.MAJOR,
+            ),
+            finding(
+                "upper-leo",
+                SatelliteOutcome.ADCS_DISTURBANCE,
+                SatelliteOutcome.TRACKING_UNCERTAINTY,
+                severity=ReportSeverity.MODERATE,
+            ),
+            finding(
+                "geo",
+                SatelliteOutcome.SURFACE_CHARGING,
+                SatelliteOutcome.DEEP_DIELECTRIC_CHARGING,
+                SatelliteOutcome.COMMUNICATION_DEGRADED,
+                severity=ReportSeverity.MINOR,
+            ),
+        )
+        satellites = [
+            {
+                "external_id": "low-leo",
+                "name": "Low LEO",
+                "orbit_regime": "LEO",
+                "operational_status": "active",
+                "altitude_km": 410.0,
+            },
+            {
+                "external_id": "upper-leo",
+                "name": "Upper LEO",
+                "orbit_regime": "LEO",
+                "operational_status": "active",
+                "altitude_km": 826.0,
+            },
+            {
+                "external_id": "geo",
+                "name": "GEO",
+                "orbit_regime": "GEO",
+                "operational_status": "active",
+                "altitude_km": 35786.0,
+            },
+        ]
+
+        rows = generate_command_runbooks_for_report(
+            report,
+            satellites,
+            report_id="report-row-1",
+        )
+
+        self.assertEqual(
+            [
+                command["catalog_command_id"]
+                for command in self._row_for_satellite(rows, "low-leo")["commands"]
+            ],
+            ["adcs_set_sunsafe", "cfs_noop"],
+        )
+        self.assertEqual(
+            [
+                command["catalog_command_id"]
+                for command in self._row_for_satellite(rows, "upper-leo")["commands"]
+            ],
+            ["adcs_set_passive", "cfs_noop"],
+        )
+        self.assertEqual(
+            [
+                command["catalog_command_id"]
+                for command in self._row_for_satellite(rows, "geo")["commands"]
+            ],
+            ["cfs_noop"],
+        )
 
     def test_batch_helper_generates_every_report_satellite_pair(self) -> None:
         reports = [

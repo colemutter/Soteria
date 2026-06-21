@@ -13,7 +13,7 @@ import sys
 from pathlib import Path
 
 import pendulum
-from airflow.decorators import dag, task
+from airflow.sdk import dag, task
 
 AIRFLOW_ROOT = Path(__file__).resolve().parents[1]
 if str(AIRFLOW_ROOT) not in sys.path:
@@ -24,12 +24,12 @@ if str(AIRFLOW_ROOT) not in sys.path:
 
 @dag(
     dag_id="swpc_event_window_etl",
-    schedule="*/5 * * * *",
+    schedule=None,
     start_date=pendulum.datetime(2026, 1, 1, tz="UTC"),
     catchup=False,
     max_active_runs=1,
     dagrun_timeout=dt.timedelta(minutes=2),
-    default_args={"retries": 1, "retry_delay": dt.timedelta(seconds=15)},
+    default_args={"retries": 2, "retry_delay": dt.timedelta(seconds=15)},
     tags=["swpc", "space-weather", "event-windows"],
 )
 def swpc_event_window_etl():

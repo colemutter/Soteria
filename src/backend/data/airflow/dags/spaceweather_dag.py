@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 
 import pendulum
-from airflow.decorators import dag, task
+from airflow.sdk import dag, task
 from airflow.providers.standard.operators.trigger_dagrun import TriggerDagRunOperator
 
 AIRFLOW_ROOT = Path(__file__).resolve().parents[1]

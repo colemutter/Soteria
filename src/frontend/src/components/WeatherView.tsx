@@ -4,6 +4,8 @@ import {
   getSolarDataset,
   conditionsAt,
   resampleSeries,
+  propagateToEarth,
+  propagationLeadMs,
   type SolarDataset,
 } from '../lib/solarData'
 
@@ -15,9 +17,9 @@ import {
  *
  * Both charts share a now → +2d window and are resampled to a fixed cadence, so
  * sparse forecast points (Kp is issued 3-hourly) read as a continuous series.
- * Resampling never extrapolates past the real data, so a series without a
- * forecast (the live IMF feed is observation-only) reads empty until data exists;
- * the demo storm carries a full 2-day profile for every driver.
+ * The IMF is measured at L1 (~1.5M km sunward), so we propagate it forward to its
+ * Earth-arrival time (Δt = L1 distance ÷ wind speed, ~30–100 min) — that turns
+ * the last hour of L1 data into a short-range forecast extending past "now".
  */
 
 const HOUR = 3600 * 1000
@@ -67,6 +69,17 @@ function relTicks(t0: number, t1: number, now: number, n = 4): Tick[] {
   })
 }
 
+/** Tick label for the IMF axis: minute resolution on short (≤3 h) windows where
+ * the propagation lead lives, falling back to hours/days for the demo's 2-day
+ * span. */
+function imfTickLabel(deltaMs: number, spanMs: number): string {
+  if (spanMs <= 3 * HOUR) {
+    const m = Math.round(deltaMs / 60_000)
+    return m === 0 ? 'now' : `+${m}m`
+  }
+  return relLabel(deltaMs)
+}
+
 export function WeatherView({ demo }: { demo: boolean }) {
   const [ds, setDs] = useState<SolarDataset | null>(null)
   const [, force] = useState(0)
@@ -99,29 +112,44 @@ export function WeatherView({ demo }: { demo: boolean }) {
   const cur = ds ? conditionsAt(ds, simClock.date) : null
   const g = cur ? gLevel(cur.kp) : null
 
-  // One shared window for both charts: now → 2 days in the future.
-  const t0 = now
-  const t1 = now + 48 * HOUR
-  const xs = (t: number) => M.l + clamp01((t - t0) / (t1 - t0)) * IW
-  const ticks = relTicks(t0, t1, now)
-  // Both charts use the same window.
-  const xsk = xs
-  const xsi = xs
-  const kpTicks: Tick[] = ticks
-  const imfTicks: Tick[] = ticks
+  // The two charts have very different forecast horizons, so each gets its own
+  // now-anchored window. Kp reaches 2 days out; the L1-propagated IMF only leads
+  // Earth by ~1 hour (it auto-expands to the full span in demo mode).
 
-  // ---- Kp ----
+  // ---- Kp: now → +2 days ----
+  const kpT0 = now
+  const kpT1 = now + 48 * HOUR
+  const xsk = (t: number) => M.l + clamp01((t - kpT0) / (kpT1 - kpT0)) * IW
+  const kpTicks: Tick[] = relTicks(kpT0, kpT1, now)
   // Resample the 3-hourly Kp forecast to a smooth hourly series across the window.
   const ysk = (v: number) => M.t + (1 - Math.min(9, Math.max(0, v)) / 9) * IH
-  const kpPts = ds ? resampleSeries(ds.kpSeries, t0, t1, HOUR) : []
+  const kpPts = ds ? resampleSeries(ds.kpSeries, kpT0, kpT1, HOUR) : []
   const barW = kpPts.length
     ? Math.max(2, Math.min(18, (IW / kpPts.length) * 0.8))
     : 4
 
-  // ---- IMF ----
-  // 15-min cadence; empty for the live feed (no future IMF), full in demo mode.
-  const bz = ds ? resampleSeries(ds.bzSeries, t0, t1, HOUR / 4) : []
-  const bt = ds ? resampleSeries(ds.btSeries, t0, t1, HOUR / 4) : []
+  // ---- IMF: now → end of the L1-propagated data ----
+  // Propagate the L1 IMF to its Earth-arrival time so it extends past "now".
+  const bzProp = ds ? propagateToEarth(ds.bzSeries, ds.speedSeries) : []
+  const btProp = ds ? propagateToEarth(ds.btSeries, ds.speedSeries) : []
+  // Current propagation lead (delay of the freshest L1 sample reaching Earth).
+  const imfLeadMin = ds
+    ? Math.round(propagationLeadMs(ds.speedSeries, now) / 60_000)
+    : 0
+  // End the window exactly at the last propagated sample (clamped to a 2-day cap
+  // for the demo's full profile); guard a minimum span so a near-empty feed can't
+  // collapse the axis.
+  const imfDataMax = bzProp.length ? bzProp[bzProp.length - 1].t : now
+  const imfT0 = now
+  const imfT1 = Math.min(imfDataMax, now + 48 * HOUR)
+  const imfSpan = Math.max(imfT1 - imfT0, 15 * 60_000)
+  const xsi = (t: number) => M.l + clamp01((t - imfT0) / imfSpan) * IW
+  const imfTicks: Tick[] = Array.from({ length: 5 }, (_, i) => {
+    const t = imfT0 + (imfSpan * i) / 4
+    return { t, label: imfTickLabel(t - now, imfSpan) }
+  })
+  const bz = resampleSeries(bzProp, imfT0, imfT1, HOUR / 4)
+  const bt = resampleSeries(btProp, imfT0, imfT1, HOUR / 4)
   const imfVals = [...bz, ...bt].map((p) => p.v)
   const vMin = Math.min(-5, ...imfVals)
   const vMax = Math.max(12, ...imfVals)
@@ -245,7 +273,14 @@ export function WeatherView({ demo }: { demo: boolean }) {
             {/* IMF Bz / Bt */}
             <section className="chart-card">
               <div className="chart-head">
-                <h2>Interplanetary magnetic field</h2>
+                <h2>
+                  Interplanetary magnetic field
+                  {imfLeadMin > 0 && (
+                    <span className="chart-note" style={{ marginLeft: 8 }}>
+                      L1-propagated · ~{imfLeadMin} min Earth lead
+                    </span>
+                  )}
+                </h2>
                 <span className="chart-legend">
                   <i className="lg lg-bz" /> Bz (GSM)
                   <i className="lg lg-bt" /> Bt

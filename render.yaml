@@ -1,0 +1,63 @@
+services:
+  - type: keyvalue
+    name: soteria-redis
+    region: ohio
+    plan: starter
+    maxmemoryPolicy: noeviction
+    ipAllowList: []
+
+  - type: web
+    name: soteria-backend
+    runtime: docker
+    region: ohio
+    plan: starter
+    dockerfilePath: ./src/backend/Dockerfile.web
+    dockerContext: ./src/backend
+    healthCheckPath: /healthz
+    envVars:
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: CLAUDE_API_KEY
+        sync: false
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: soteria-redis
+          property: connectionString
+      - key: FRONTEND_ORIGIN
+        value: https://soteria-frontend.onrender.com
+
+  - type: worker
+    name: soteria-poller
+    runtime: docker
+    region: ohio
+    plan: starter
+    dockerfilePath: ./src/backend/Dockerfile.poller
+    dockerContext: ./src/backend
+    envVars:
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: CLAUDE_API_KEY
+        sync: false
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: soteria-redis
+          property: connectionString
+      - key: SOTERIA_REACTION_SERVICE_URL
+        value: https://soteria-backend.onrender.com/api/poller/report
+
+  - type: web
+    name: soteria-frontend
+    runtime: static
+    buildCommand: cd src/frontend && npm ci && npm run build
+    staticPublishPath: ./src/frontend/dist
+    envVars:
+      - key: VITE_SUPABASE_URL
+        sync: false
+      - key: VITE_SUPABASE_ANON_KEY
+        sync: false

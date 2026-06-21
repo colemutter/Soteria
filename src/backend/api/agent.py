@@ -6,13 +6,14 @@ import logging
 from fastapi import APIRouter, BackgroundTasks, status
 from pydantic import BaseModel, ConfigDict
 
-from .poller import EventWindowReactionMessage
+from .poller import EventWindowReactionBatch, EventWindowReactionMessage
 
 logger = logging.getLogger("soteria.api.agent")
 
 REACTION_AGENT_NAME = "event-report-agent"
 
 router = APIRouter(prefix="/agent", tags=["agent"])
+poller_report_router = APIRouter(prefix="/api/poller", tags=["poller"])
 
 
 class AgentReactionAccepted(BaseModel):
@@ -23,6 +24,22 @@ class AgentReactionAccepted(BaseModel):
     event_window_id: str
     priority: str
     session_id: str
+
+
+try:
+    from agent.report_generation import (
+        EventWindowReportRunResult,
+        generate_reports_for_event_windows,
+        persist_report_run_result,
+    )
+    from agent.tools import _get_supabase_client
+except ImportError:
+    from report_generation import (
+        EventWindowReportRunResult,
+        generate_reports_for_event_windows,
+        persist_report_run_result,
+    )
+    from tools import _get_supabase_client
 
 
 @router.post(
@@ -88,3 +105,29 @@ def build_reaction_agent_message(reaction: EventWindowReactionMessage) -> str:
         "Use the event-window payload below to draft the next report or follow-up.\n\n"
         f"{payload}"
     )
+
+
+@poller_report_router.post("/report", response_model=EventWindowReportRunResult)
+async def create_poller_report(
+    reaction_batch: EventWindowReactionBatch,
+) -> EventWindowReportRunResult:
+    """Generate validated reports from a Poller event-window batch."""
+    session_id = f"poller:{reaction_batch.detected_at.isoformat()}"
+    logger.info(
+        "accepted poller report batch event_window_count=%s priority=%s session_id=%s",
+        len(reaction_batch.event_window_ids),
+        reaction_batch.priority,
+        session_id,
+    )
+    client = _get_supabase_client()
+    result = await generate_reports_for_event_windows(
+        reaction_batch.event_window_ids,
+        client=client,
+        session_id=session_id,
+    )
+    try:
+        result.persisted_rows_count = persist_report_run_result(client, result)
+    except Exception as exc:
+        logger.exception("failed to persist poller report result: %s", exc)
+        result.persistence_errors.append(str(exc))
+    return result

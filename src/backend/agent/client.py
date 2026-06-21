@@ -53,6 +53,7 @@ def build_agent_options(
     allowed_tools: list[str] | None = None,
     mcp_servers: dict[str, Any] | str | Path | None = None,
     agents: dict[str, Any] | None = None,
+    output_format: dict[str, Any] | None = None,
     api_key: str | None = None,
 ) -> ClaudeAgentOptions:
     """Build the shared Claude Agent SDK configuration for Soteria."""
@@ -62,9 +63,10 @@ def build_agent_options(
         cwd=cwd,
         session_id=_normalize_session_id(session_id),
         max_turns=max_turns,
-        allowed_tools=allowed_tools or SOTERIA_ALLOWED_TOOLS,
-        mcp_servers=mcp_servers or {"soteria": soteria_tools_server},
-        agents=agents or SOTERIA_AGENTS,
+        allowed_tools=allowed_tools if allowed_tools is not None else SOTERIA_ALLOWED_TOOLS,
+        mcp_servers=mcp_servers if mcp_servers is not None else {"soteria": soteria_tools_server},
+        agents=agents if agents is not None else SOTERIA_AGENTS,
+        output_format=output_format,
         env=_sdk_env(api_key),
     )
 

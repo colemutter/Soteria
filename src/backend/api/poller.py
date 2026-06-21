@@ -388,7 +388,12 @@ class EventWindowPoller:
 def build_dispatcher(client: Any) -> ReactionDispatcher:
     reaction_url = os.getenv("SOTERIA_REACTION_SERVICE_URL")
     if reaction_url:
-        return HttpReactionDispatcher(reaction_url)
+        return HttpReactionDispatcher(
+            reaction_url,
+            timeout_seconds=float(
+                os.getenv("SOTERIA_REACTION_SERVICE_TIMEOUT_SECONDS", "10")
+            ),
+        )
 
     if _env_bool("SOTERIA_USE_REACTION_JOBS"):
         table = os.getenv("SOTERIA_REACTION_JOBS_TABLE", "agent_reaction_jobs")

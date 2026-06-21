@@ -2,12 +2,17 @@ import { useEffect, useState } from 'react'
 import { simClock } from '../lib/simClock'
 import { geodeticAt, orbitalElements, type GeodeticInfo } from '../lib/orbital'
 import type { SatelliteEntry } from '../data/satellites'
+import type { SatelliteAlert } from '../lib/alerts'
 import { DangerIcon, DANGER_LABELS } from './DangerIcon'
+import { ViewAlertsButton } from './ViewAlertsButton'
 
 interface Props {
   satellites: SatelliteEntry[]
+  alerts: SatelliteAlert[]
+  alertsBySatellite: Map<string, SatelliteAlert[]>
   selectedId: string | null
   onSelect: (id: string | null) => void
+  onOpenAlerts: (id: string) => void
   shadingOn: boolean
   onToggleShading: () => void
   solarWindOn: boolean
@@ -34,8 +39,11 @@ function formatOffset(ms: number): string {
 
 export function Hud({
   satellites,
+  alerts,
+  alertsBySatellite,
   selectedId,
   onSelect,
+  onOpenAlerts,
   shadingOn,
   onToggleShading,
   solarWindOn,
@@ -70,10 +78,18 @@ export function Hud({
     elements = orbitalElements(selected.satrec)
   }
 
-  // Alerts aren't wired up yet — placeholder counts surfaced in the pane header.
-  // These will be derived from a real alerts feed later.
-  const imminentAlerts = 0
-  const cautionAlerts = 0
+  // Only surface alerts whose satellite is currently loaded, so clicking one can
+  // actually open it. Names are resolved from the live list (falling back to the
+  // alert's own name / id) for display.
+  const byId = new Map(satellites.map((s) => [s.id, s]))
+  const visibleAlerts = alerts.filter((a) => byId.has(a.satelliteId))
+  const imminentAlerts = visibleAlerts.filter((a) => a.level === 'critical').length
+  const cautionAlerts = visibleAlerts.filter((a) => a.level === 'caution').length
+  const satName = (a: SatelliteAlert) =>
+    byId.get(a.satelliteId)?.name ?? a.satelliteName ?? a.satelliteId
+  const selectedAlerts = selected
+    ? alertsBySatellite.get(selected.id) ?? []
+    : []
 
   return (
     <>
@@ -128,7 +144,34 @@ export function Hud({
             </div>
           </div>
           <div className="alerts-body">
-            <p className="alerts-empty">No active alerts.</p>
+            {visibleAlerts.length === 0 ? (
+              <p className="alerts-empty">No active alerts.</p>
+            ) : (
+              <div className="alert-list">
+                {visibleAlerts.map((a) => (
+                  <button
+                    key={a.id}
+                    className={`alert-item lvl-${a.level} ${
+                      a.satelliteId === selectedId ? 'active' : ''
+                    }`}
+                    onClick={() => {
+                      onSelect(a.satelliteId)
+                      onOpenAlerts(a.satelliteId)
+                    }}
+                    title={`${satName(a)} — ${a.title}`}
+                  >
+                    <DangerIcon level={a.level} size={14} />
+                    <span className="alert-item-text">
+                      <span className="alert-item-name">{satName(a)}</span>
+                      <span className="alert-item-title">{a.title}</span>
+                    </span>
+                    <span className={`alert-item-risk lvl-${a.level}`}>
+                      {a.riskLabel}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -270,6 +313,11 @@ export function Hud({
           ) : (
             <p className="desc">Propagation unavailable at this time.</p>
           )}
+
+          <ViewAlertsButton
+            alerts={selectedAlerts}
+            onClick={() => selected && onOpenAlerts(selected.id)}
+          />
         </div>
       )}
     </>

@@ -3,14 +3,18 @@ import { simClock } from '../lib/simClock'
 import { geodeticAt, orbitalElements, type GeodeticInfo } from '../lib/orbital'
 import type { SatelliteEntry } from '../data/satellites'
 import type { TleRecord } from '../lib/tleApi'
+import type { SatelliteAlert } from '../lib/alerts'
 import { DangerIcon, DANGER_LABELS } from './DangerIcon'
 import { AddSatellite } from './AddSatellite'
 import { ModelViewer } from './ModelViewer'
+import { ViewAlertsButton } from './ViewAlertsButton'
 
 interface Props {
   satellites: SatelliteEntry[]
+  alertsBySatellite: Map<string, SatelliteAlert[]>
   selectedId: string | null
   onSelect: (id: string | null) => void
+  onOpenAlerts: (id: string) => void
   onAddTheoretical: (name: string, line1: string, line2: string) => SatelliteEntry
   onAddReal: (record: TleRecord) => SatelliteEntry
 }
@@ -27,8 +31,10 @@ const KIND_LABEL: Record<string, string> = {
  */
 export function SatellitesView({
   satellites,
+  alertsBySatellite,
   selectedId,
   onSelect,
+  onOpenAlerts,
   onAddTheoretical,
   onAddReal,
 }: Props) {
@@ -44,6 +50,9 @@ export function SatellitesView({
   }, [])
 
   const selected = satellites.find((s) => s.id === selectedId)
+  const selectedAlerts = selected
+    ? alertsBySatellite.get(selected.id) ?? []
+    : []
   let info: GeodeticInfo | null = null
   let elements: ReturnType<typeof orbitalElements> | null = null
   if (selected && !selected.error) {
@@ -130,6 +139,11 @@ export function SatellitesView({
               ) : (
                 <p className="desc">Propagation unavailable at this time.</p>
               )}
+
+              <ViewAlertsButton
+                alerts={selectedAlerts}
+                onClick={() => selected && onOpenAlerts(selected.id)}
+              />
             </div>
           </>
         ) : (

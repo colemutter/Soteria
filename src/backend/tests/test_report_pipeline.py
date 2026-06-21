@@ -311,6 +311,87 @@ class ReportPipelineTest(unittest.TestCase):
         self.assertEqual(len(bundle.satellites), 2)
         self.assertIn("Selected top 2 of 5", bundle.satellite_selection_notes[-1])
 
+    def test_deterministic_guidance_reaches_every_actionable_outcome(self) -> None:
+        client = FakeClient(
+            event_windows=[
+                event_row("ew_geomagnetic"),
+                {
+                    **event_row("ew_radiation"),
+                    "event_type": "solar_particle_radiation_storm",
+                    "source_product": "swpc_s_scale",
+                    "evidence": {"proton_flux": 42},
+                },
+                {
+                    **event_row("ew_charging"),
+                    "event_type": "energetic_electron_charging",
+                    "source_product": "swpc_electron_flux",
+                    "evidence": {"dielectric_charging": "elevated"},
+                },
+                {
+                    **event_row("ew_communications"),
+                    "event_type": "radio_blackout",
+                    "source_product": "swpc_r_scale",
+                    "evidence": {"tec_scintillation": "possible"},
+                },
+            ],
+            satellites=[
+                satellite_row("leo-low", orbit_regime="LEO", altitude_km=390),
+                satellite_row("geo-asset", orbit_regime="GEO", altitude_km=35786),
+            ],
+        )
+
+        result = build_report_evidence_bundles(
+            [
+                "ew_geomagnetic",
+                "ew_radiation",
+                "ew_charging",
+                "ew_communications",
+            ],
+            client,
+            created_at=NOW,
+        )
+
+        reached_outcomes = {
+            outcome
+            for bundle in result.bundles
+            for guidance in bundle.impact_guidance
+            for outcome in guidance.likely_outcomes
+        }
+        self.assertEqual(
+            reached_outcomes,
+            set(SatelliteOutcome)
+            - {SatelliteOutcome.NO_MATERIAL_SATELLITE_EFFECT_EXPECTED},
+        )
+
+    def test_deterministic_guidance_fallback_reaches_no_material_effect(self) -> None:
+        client = FakeClient(
+            event_windows=[
+                {
+                    **event_row("ew_generic"),
+                    "event_type": "unclassified_space_weather_notice",
+                    "source_product": "operator_manual_entry",
+                    "evidence": {"note": "monitor only"},
+                }
+            ],
+            satellites=[satellite_row("leo-low", orbit_regime="LEO", altitude_km=390)],
+        )
+
+        result = build_report_evidence_bundles(
+            ["ew_generic"],
+            client,
+            created_at=NOW,
+        )
+
+        bundle = result.bundles[0]
+        self.assertEqual(
+            bundle.impact_guidance[0].likely_outcomes,
+            [SatelliteOutcome.NO_MATERIAL_SATELLITE_EFFECT_EXPECTED],
+        )
+        self.assertEqual(
+            bundle.impact_guidance[0].relevance_reason,
+            "fallback_active_satellite",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

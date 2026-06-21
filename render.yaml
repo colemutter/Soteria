@@ -27,9 +27,9 @@ services:
           name: soteria-redis
           property: connectionString
       - key: FRONTEND_ORIGIN
-        value: https://soteria-frontend.onrender.com
+        value: https://soteria-frontend-vcck.onrender.com
       - key: FRONTEND_ORIGINS
-        value: https://soteria-frontend.onrender.com
+        value: https://soteria-frontend-vcck.onrender.com
       - key: FRONTEND_ORIGIN_REGEX
         value: 'https://.*\.onrender\.com'
 
@@ -53,7 +53,7 @@ services:
           name: soteria-redis
           property: connectionString
       - key: SOTERIA_REACTION_SERVICE_URL
-        value: https://soteria-backend.onrender.com/api/poller/report
+        value: https://soteria-backend-7360.onrender.com/api/poller/report
       - key: SOTERIA_REACTION_SERVICE_TIMEOUT_SECONDS
         value: "420"
 
@@ -71,4 +71,4 @@ services:
       # so a rebuild is required for changes to take effect. Required for adding/
       # restoring satellites (they persist via the backend, not Supabase directly).
       - key: VITE_API_BASE_URL
-        value: https://soteria-backend.onrender.com
+        value: https://soteria-backend-7360.onrender.com

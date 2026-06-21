@@ -210,6 +210,17 @@ def recommend_command_policy_for_finding(
             SatelliteOutcome.GNSS_NAVIGATION_DEGRADED,
         },
     ):
+        selections.append(
+            _selection(
+                "cfs_noop",
+                command_catalog,
+                reason=(
+                    "Orbit, tracking, or navigation degradation maps to a low-risk "
+                    "CFS commandability check before manual planning actions."
+                ),
+                risk_level=CommandPolicyRiskLevel.LOW,
+            )
+        )
         no_action_reasons.append(
             "Orbit, tracking, or navigation degradation has no catalogued NOS3 "
             "maneuver/planning command."
@@ -436,10 +447,7 @@ def _finding_outcomes(
     finding: SatelliteImpactFinding,
     report: EventWindowSatelliteReport | None,
 ) -> set[SatelliteOutcome]:
-    outcomes = set(finding.possible_outcomes)
-    if report is not None:
-        outcomes.update(report.possible_outcomes)
-    return outcomes
+    return set(finding.possible_outcomes)
 
 
 def _has_outcome(

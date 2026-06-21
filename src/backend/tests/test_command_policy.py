@@ -133,15 +133,37 @@ class CommandPolicyTest(unittest.TestCase):
         self.assertTrue(decision.human_review_required)
         self.assertEqual(decision.risk_level, CommandPolicyRiskLevel.HIGH)
 
-    def test_orbit_drag_produces_no_action_manual_review(self) -> None:
+    def test_orbit_drag_selects_commandability_check(self) -> None:
         decision = recommend_command_policy_for_finding(
             finding(SatelliteOutcome.INCREASED_DRAG),
         )
 
-        self.assertEqual(decision.selected_commands, [])
+        self.assertEqual(
+            [selection.catalog_command_id for selection in decision.selected_commands],
+            ["cfs_noop"],
+        )
+        self.assertFalse(decision.human_review_required)
+        self.assertEqual(decision.risk_level, CommandPolicyRiskLevel.LOW)
+        self.assertIn(
+            "commandability check",
+            decision.selected_commands[0].reason,
+        )
+        self.assertIsNone(decision.no_action_reason)
+
+    def test_geomagnetic_pointing_and_tracking_selects_sunsafe_and_noop(self) -> None:
+        decision = recommend_command_policy_for_finding(
+            finding(
+                SatelliteOutcome.ADCS_DISTURBANCE,
+                SatelliteOutcome.TRACKING_UNCERTAINTY,
+            ),
+        )
+
+        self.assertEqual(
+            [selection.catalog_command_id for selection in decision.selected_commands],
+            ["adcs_set_sunsafe", "cfs_noop"],
+        )
         self.assertTrue(decision.human_review_required)
-        self.assertEqual(decision.risk_level, CommandPolicyRiskLevel.MEDIUM)
-        self.assertIn("no catalogued NOS3 maneuver", decision.no_action_reason)
+        self.assertEqual(decision.risk_level, CommandPolicyRiskLevel.HIGH)
 
     def test_generic_radiation_protection_is_no_action(self) -> None:
         decision = recommend_command_policy_for_finding(
@@ -186,6 +208,32 @@ class CommandPolicyTest(unittest.TestCase):
                 satellite_metadata={"supports_sample_payload": True},
                 catalog=catalog_without_sample_disable,
             )
+
+    def test_report_level_outcomes_do_not_leak_into_finding_decision(self) -> None:
+        satellite_finding = finding(SatelliteOutcome.COMMUNICATION_DEGRADED)
+        report = EventWindowSatelliteReport(
+            event_window_id="ew-1",
+            evidence_hash="hash-1",
+            event_severity=ReportSeverity.MAJOR,
+            summary="Solar weather report.",
+            possible_outcomes=[
+                SatelliteOutcome.COMMUNICATION_DEGRADED,
+                SatelliteOutcome.INCREASED_DRAG,
+            ],
+            findings=[satellite_finding],
+            confidence="medium",
+        )
+
+        decision = recommend_command_policy_for_finding(
+            satellite_finding,
+            report=report,
+            context=CommandPolicyContext(telemetry_recovery=True),
+        )
+
+        self.assertEqual(
+            [selection.catalog_command_id for selection in decision.selected_commands],
+            ["radio_resume_output"],
+        )
 
     def test_report_input_returns_decision_per_finding(self) -> None:
         satellite_finding = finding(SatelliteOutcome.PAYLOAD_NOISE)

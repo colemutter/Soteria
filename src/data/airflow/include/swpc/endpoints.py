@@ -26,7 +26,77 @@ MINIMAL_PROTECTION_ENDPOINTS = [
 ]
 
 
+SOLAR_WIND_PRODUCT_ENDPOINTS = [
+    Endpoint(
+        "/products/solar-wind/ephemerides.json",
+        "solar_wind_ephemerides",
+        protection_tier="asset_specific",
+    ),
+    Endpoint(
+        "/products/solar-wind/mag-1-day.json",
+        "solar_wind_mag",
+        protection_tier="asset_specific",
+    ),
+    Endpoint(
+        "/products/solar-wind/mag-2-hour.json",
+        "solar_wind_mag",
+        protection_tier="asset_specific",
+    ),
+    Endpoint(
+        "/products/solar-wind/mag-3-day.json",
+        "solar_wind_mag",
+        protection_tier="asset_specific",
+    ),
+    Endpoint(
+        "/products/solar-wind/mag-5-minute.json",
+        "solar_wind_mag",
+        protection_tier="asset_specific",
+    ),
+    Endpoint(
+        "/products/solar-wind/mag-6-hour.json",
+        "solar_wind_mag",
+        protection_tier="asset_specific",
+    ),
+    Endpoint(
+        "/products/solar-wind/mag-7-day.json",
+        "solar_wind_mag",
+        protection_tier="asset_specific",
+    ),
+    Endpoint(
+        "/products/solar-wind/plasma-1-day.json",
+        "solar_wind_plasma",
+        protection_tier="asset_specific",
+    ),
+    Endpoint(
+        "/products/solar-wind/plasma-2-hour.json",
+        "solar_wind_plasma",
+        protection_tier="asset_specific",
+    ),
+    Endpoint(
+        "/products/solar-wind/plasma-3-day.json",
+        "solar_wind_plasma",
+        protection_tier="asset_specific",
+    ),
+    Endpoint(
+        "/products/solar-wind/plasma-5-minute.json",
+        "solar_wind_plasma",
+        protection_tier="asset_specific",
+    ),
+    Endpoint(
+        "/products/solar-wind/plasma-6-hour.json",
+        "solar_wind_plasma",
+        protection_tier="asset_specific",
+    ),
+    Endpoint(
+        "/products/solar-wind/plasma-7-day.json",
+        "solar_wind_plasma",
+        protection_tier="asset_specific",
+    ),
+]
+
+
 ASSET_SPECIFIC_PROTECTION_ENDPOINTS = [
+    *SOLAR_WIND_PRODUCT_ENDPOINTS,
     Endpoint(
         "/json/goes/secondary/xrays-6-hour.json",
         "xray",

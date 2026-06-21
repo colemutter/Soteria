@@ -72,7 +72,7 @@ def swpc_realtime_etl():
         trigger_run_id="swpc_event_window__{{ run_id }}",
         conf={"source_dag_run_id": "{{ run_id }}"},
         reset_dag_run=True,
-        wait_for_completion=False,
+        wait_for_completion=True,
     )
     alert_task >> derive_event_windows
 

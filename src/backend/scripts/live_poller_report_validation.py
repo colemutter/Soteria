@@ -548,6 +548,36 @@ async def run_once():
             poll_interval_seconds=1,
         )
     )
+
+    class VerboseDispatcher:
+        def __init__(self, inner):
+            self.inner = inner
+
+        async def dispatch(self, batch):
+            print(
+                {
+                    "http_dispatch_start": True,
+                    "url": getattr(self.inner, "url", None),
+                    "event_window_ids": batch.event_window_ids,
+                    "event_window_count": len(batch.event_window_ids),
+                    "note": (
+                        "If output pauses here, the backend is inside "
+                        "/api/poller/report running the live report agent."
+                    ),
+                },
+                flush=True,
+            )
+            await self.inner.dispatch(batch)
+            print(
+                {
+                    "http_dispatch_done": True,
+                    "event_window_ids": batch.event_window_ids,
+                },
+                flush=True,
+            )
+
+    poller.dispatcher = VerboseDispatcher(poller.dispatcher)
+
     target_updated_at = os.getenv("LIVE_POLLER_TARGET_UPDATED_AT", "").strip()
     if target_updated_at:
         target_time = _parse_utc(target_updated_at)

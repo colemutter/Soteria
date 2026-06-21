@@ -1,5 +1,6 @@
 import { geodeticAt, type SatRec } from './orbital'
 import { apiRequest } from './apiClient'
+import { rememberSatelliteRows } from './savedSatellites'
 import type { SatelliteEntry } from '../data/satellites'
 
 /**
@@ -131,12 +132,14 @@ export async function syncSatellites(
 ): Promise<void> {
   const rows = entries.filter((e) => !e.error).map((e) => toSatelliteRow(e, date))
   if (rows.length === 0) return
+  rememberSatelliteRows(rows)
   try {
-    await apiRequest<SatelliteUpsertResponse>('/api/satellites', {
+    const response = await apiRequest<SatelliteUpsertResponse>('/api/satellites', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ satellites: rows }),
     })
+    if (response) rememberSatelliteRows(response.satellites)
   } catch (error) {
     console.error(
       '[api] satellite sync failed:',

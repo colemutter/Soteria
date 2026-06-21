@@ -8,6 +8,8 @@ from dotenv import load_dotenv
 from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict, Field
 
+from agent.command_runbook_persistence import validate_catalog_backed_runbook
+
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 load_dotenv(BACKEND_ROOT / ".env")
 
@@ -92,12 +94,18 @@ class CommandRunbookPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     report_id: str = Field(min_length=1)
+    event_window_id: str | None = None
     satellite_id: str | None = None
     satellite_external_id: str | None = None
+    catalog_version: str | None = None
+    policy_version: str | None = None
+    evidence_hash: str | None = None
+    dedupe_key: str | None = None
     title: str = Field(min_length=1)
     summary: str | None = None
     commands: list[Any] = Field(default_factory=list)
     risk_level: str = "unknown"
+    status: str | None = None
     source: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
@@ -164,9 +172,17 @@ async def receive_generated_runbook(
 ) -> CommandRunbookResponse:
     """Receive an AI-generated command runbook draft."""
     row = payload.runbook.model_dump(exclude_none=True)
-    row["status"] = "generated"
+    try:
+        row = validate_catalog_backed_runbook(row)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
     response = _execute_query(
-        _get_supabase_client().table("command_runbooks").insert(row),
+        _get_supabase_client()
+        .table("command_runbooks")
+        .upsert(row, on_conflict="dedupe_key"),
         "Failed to receive generated runbook",
     )
     data = response.data or [row]

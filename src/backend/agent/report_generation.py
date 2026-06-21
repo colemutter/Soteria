@@ -76,6 +76,9 @@ class EventWindowReportRunResult(BaseModel):
     session_id: str | None = None
     persisted_rows_count: int = 0
     persistence_errors: list[str] = []
+    runbooks_generated_count: int = 0
+    runbooks_persisted_count: int = 0
+    runbook_errors: list[str] = []
 
 
 def build_report_prompt(bundle: ReportEvidenceBundle) -> str:

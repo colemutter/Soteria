@@ -27,18 +27,22 @@ class AgentReactionAccepted(BaseModel):
 
 
 try:
+    from agent.command_runbook_generation import generate_command_runbooks_for_reports
     from agent.report_generation import (
         EventWindowReportRunResult,
         generate_reports_for_event_windows,
         persist_report_run_result,
     )
+    from agent.report_pipeline import query_active_satellite_evidence
     from agent.tools import _get_supabase_client
 except ImportError:
+    from command_runbook_generation import generate_command_runbooks_for_reports
     from report_generation import (
         EventWindowReportRunResult,
         generate_reports_for_event_windows,
         persist_report_run_result,
     )
+    from report_pipeline import query_active_satellite_evidence
     from tools import _get_supabase_client
 
 
@@ -130,4 +134,33 @@ async def create_poller_report(
     except Exception as exc:
         logger.exception("failed to persist poller report result: %s", exc)
         result.persistence_errors.append(str(exc))
+    try:
+        if result.reports:
+            satellite_result = query_active_satellite_evidence(client)
+            if satellite_result.validation_errors:
+                result.runbook_errors.extend(satellite_result.validation_errors)
+            runbook_rows = generate_command_runbooks_for_reports(
+                result.reports,
+                satellite_result.satellites,
+            )
+            result.runbooks_generated_count = len(runbook_rows)
+            result.runbooks_persisted_count = persist_command_runbook_rows(
+                client,
+                runbook_rows,
+            )
+    except Exception as exc:
+        logger.exception("failed to generate poller report command runbooks: %s", exc)
+        result.runbook_errors.append(str(exc))
     return result
+
+
+def persist_command_runbook_rows(client, rows: list[dict]) -> int:
+    """Upsert generated command runbooks by deterministic dedupe key."""
+    if not rows:
+        return 0
+    response = (
+        client.table("command_runbooks")
+        .upsert(rows, on_conflict="dedupe_key")
+        .execute()
+    )
+    return len(response.data or rows)

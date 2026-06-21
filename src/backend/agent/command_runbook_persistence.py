@@ -183,7 +183,10 @@ def _validate_catalog_arg_metadata(
         "units",
         "scenario_example",
     ):
-        if field_name in selected_arg and selected_arg[field_name] != catalog_payload[field_name]:
+        if (
+            field_name in selected_arg
+            and selected_arg[field_name] != catalog_payload[field_name]
+        ):
             raise ValueError(
                 f"commands[{index}].args[{arg_index}].{field_name} must match "
                 f"catalog arg {catalog_arg.name}"
@@ -214,7 +217,9 @@ def _validate_allowed_value(
     if value is None or catalog_arg.allowed_values is None:
         return
     if isinstance(catalog_arg.allowed_values, dict):
-        allowed = set(catalog_arg.allowed_values) | set(catalog_arg.allowed_values.values())
+        allowed = set(catalog_arg.allowed_values) | set(
+            catalog_arg.allowed_values.values()
+        )
     else:
         allowed = set(catalog_arg.allowed_values)
     if value not in allowed:

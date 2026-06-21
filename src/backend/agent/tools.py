@@ -10,6 +10,18 @@ from typing import Any
 from claude_agent_sdk import create_sdk_mcp_server, tool
 from dotenv import load_dotenv
 
+from agent.command_catalog import (
+    CommandRecord,
+    assert_catalog_command_ids,
+    find_catalog_commands,
+    load_command_catalog,
+)
+from agent.command_policy import POLICY_VERSION, validate_policy_catalog_command
+from agent.openc3_runbook_renderer import (
+    render_openc3_ruby_command,
+    render_openc3_ruby_runbook,
+)
+
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 load_dotenv(BACKEND_ROOT / ".env")
 
@@ -29,6 +41,8 @@ DEFAULT_EVENT_HORIZON_HOURS = 24
 MAX_EVENT_HORIZON_HOURS = 24 * 14
 MAX_EVENT_WINDOW_LIMIT = 200
 MAX_SATELLITE_LIMIT = 200
+MAX_COMMAND_LIMIT = 50
+DRAFT_REVIEW_STATUS = "DRAFT / HUMAN REVIEW REQUIRED"
 
 
 def _tool_text(payload: dict[str, Any], *, is_error: bool = False) -> dict[str, Any]:
@@ -96,6 +110,27 @@ def _int_list(value: Any) -> list[int]:
     return items
 
 
+def _optional_bool(value: Any) -> bool | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "1", "yes", "y"}:
+            return True
+        if normalized in {"false", "0", "no", "n"}:
+            return False
+    return None
+
+
+def _optional_string(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
 def _get_supabase_client() -> Any:
     url = os.getenv("SUPABASE_URL")
     key = (
@@ -131,6 +166,119 @@ def _query_event_windows(
         query = query.in_("event_type", event_types)
     response = query.execute()
     return [dict(row) for row in response.data or []]
+
+
+def _catalog_command_payload(command: CommandRecord) -> dict[str, Any]:
+    payload = {
+        "catalog_command_id": command.id,
+        "catalog_version": command.catalog_version,
+        "status": command.status.value,
+        "simulator_only": command.simulator_only,
+        "target": command.target,
+        "command": command.command,
+        "args": [arg.model_dump(mode="json") for arg in command.args],
+        "intent": command.intent,
+        "outcomes": list(command.outcomes),
+        "manual_allowed": command.manual_allowed,
+        "automated_allowed": command.automated_allowed,
+        "human_review_required": command.human_review_required,
+        "preconditions": list(command.preconditions),
+        "verifier": (
+            command.verifier.model_dump(mode="json")
+            if command.verifier is not None
+            else None
+        ),
+        "timeout_seconds": command.timeout_seconds,
+        "result_classification": command.result_classification,
+    }
+    try:
+        payload["ruby_rendering"] = render_openc3_ruby_command(command)
+    except ValueError as exc:
+        payload["ruby_rendering"] = None
+        payload["ruby_rendering_error"] = str(exc)
+    return payload
+
+
+def _catalog_command_ids(args: dict[str, Any]) -> list[str]:
+    command_ids = _string_list(args.get("command_ids"))
+    for key in ("command_id", "catalog_command_id"):
+        value = _optional_string(args.get(key))
+        if value:
+            command_ids.insert(0, value)
+    return list(dict.fromkeys(command_ids))
+
+
+def _report_outcomes(args: dict[str, Any]) -> list[str]:
+    outcomes = _string_list(args.get("outcomes"))
+    for key in ("outcome", "report_outcome"):
+        value = _optional_string(args.get(key))
+        if value:
+            outcomes.append(value)
+    return list(dict.fromkeys(outcomes))
+
+
+def _plan_command_entries(args: dict[str, Any]) -> list[dict[str, Any]]:
+    entries: list[dict[str, Any]] = [
+        {"catalog_command_id": command_id}
+        for command_id in _catalog_command_ids(args)
+    ]
+    for item in args.get("commands") or []:
+        if isinstance(item, str):
+            entries.append({"catalog_command_id": item})
+        elif isinstance(item, dict):
+            entries.append(dict(item))
+        else:
+            raise ValueError("commands must contain catalog command IDs or objects.")
+
+    target = _optional_string(args.get("target"))
+    command = _optional_string(args.get("command"))
+    if target or command:
+        if not entries:
+            raise ValueError(
+                "draft plans must use catalog_command_id; free-form target/command "
+                "is not accepted."
+            )
+        entries[0] = {
+            **entries[0],
+            "target": target,
+            "command": command,
+        }
+    return entries
+
+
+def _validate_plan_entries(entries: list[dict[str, Any]]) -> list[CommandRecord]:
+    if not entries:
+        raise ValueError("at least one catalog command ID is required.")
+
+    commands: list[CommandRecord] = []
+    for entry in entries:
+        command_id = _optional_string(
+            entry.get("catalog_command_id") or entry.get("command_id")
+        )
+        if not command_id:
+            raise ValueError(
+                "each draft command must include catalog_command_id; free-form "
+                "target/command is not accepted."
+            )
+        command = validate_policy_catalog_command(command_id)
+        expected = {
+            "target": command.target,
+            "command": command.command,
+        }
+        for field_name, expected_value in expected.items():
+            supplied = _optional_string(entry.get(field_name))
+            if supplied is not None and supplied != expected_value:
+                raise ValueError(
+                    f"{field_name} mismatch for catalog command {command.id}: "
+                    f"{supplied!r} != {expected_value!r}"
+                )
+        if entry.get("args") not in (None, [], {}):
+            raise ValueError(
+                f"args override is not accepted for catalog command {command.id}; "
+                "catalog args are authoritative."
+            )
+        commands.append(command)
+    return commands
 
 
 def _query_satellites(
@@ -343,35 +491,256 @@ async def get_user_satellites(args):
 
 @tool(
     "get_satellite_command",
-    "Fetch approved satellite commands for the given satellite type and operation.",
-    {"satellite_type": str, "operation": str},
+    "Fetch structured catalog-backed satellite commands by ID, intent, outcome, or safety status.",
+    {
+        "type": "object",
+        "properties": {
+            "command_id": {
+                "type": "string",
+                "description": "Optional exact catalog command ID.",
+            },
+            "command_ids": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Optional exact catalog command IDs.",
+            },
+            "intent": {
+                "type": "string",
+                "description": "Optional catalog intent filter.",
+            },
+            "outcome": {
+                "type": "string",
+                "description": "Optional report outcome filter.",
+            },
+            "outcomes": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Optional report outcome filters.",
+            },
+            "status": {
+                "type": "string",
+                "description": "Optional catalog status filter.",
+            },
+            "automated_allowed": {
+                "type": "boolean",
+                "description": "Optional automation-allowed filter.",
+            },
+            "manual_allowed": {
+                "type": "boolean",
+                "description": "Optional manual-allowed filter.",
+            },
+            "human_review_required": {
+                "type": "boolean",
+                "description": "Optional human-review-required filter.",
+            },
+            "satellite_id": {
+                "type": "string",
+                "description": "Optional satellite context echoed in the response.",
+            },
+            "report_id": {
+                "type": "string",
+                "description": "Optional report context echoed in the response.",
+            },
+            "limit": {
+                "type": "integer",
+                "description": "Maximum catalog commands to return.",
+                "minimum": 1,
+                "maximum": MAX_COMMAND_LIMIT,
+            },
+        },
+        "additionalProperties": False,
+    },
 )
-async def get_satellite_commands(args):
+async def get_satellite_command(args):
+    args = args or {}
+    try:
+        catalog = load_command_catalog()
+        command_ids = _catalog_command_ids(args)
+        intent = _optional_string(args.get("intent"))
+        status = _optional_string(args.get("status"))
+        outcomes = _report_outcomes(args)
+        automated_allowed = _optional_bool(args.get("automated_allowed"))
+        manual_allowed = _optional_bool(args.get("manual_allowed"))
+        human_review_required = _optional_bool(args.get("human_review_required"))
+        limit = _positive_int(
+            args.get("limit"),
+            default=MAX_COMMAND_LIMIT,
+            maximum=MAX_COMMAND_LIMIT,
+        )
 
-    return {
-        "content": [
+        if command_ids:
+            commands = assert_catalog_command_ids(command_ids)
+        else:
+            commands = find_catalog_commands(
+                intent=intent,
+                status=status,
+                automated_allowed=automated_allowed,
+            )
+
+        if outcomes:
+            commands = [
+                command
+                for command in commands
+                if any(outcome in command.outcomes for outcome in outcomes)
+            ]
+        if status is not None:
+            commands = [
+                command
+                for command in commands
+                if command.status.value == status
+            ]
+        if automated_allowed is not None:
+            commands = [
+                command
+                for command in commands
+                if command.automated_allowed is automated_allowed
+            ]
+        if manual_allowed is not None:
+            commands = [
+                command
+                for command in commands
+                if command.manual_allowed is manual_allowed
+            ]
+        if human_review_required is not None:
+            commands = [
+                command
+                for command in commands
+                if command.human_review_required is human_review_required
+            ]
+        commands = commands[:limit]
+    except Exception as exc:
+        return _tool_text(
             {
-                "type": "text",
-                "text": "Return redacted command here.",
-            }
-        ]
-    }
+                "error": "Failed to get catalog satellite commands.",
+                "detail": str(exc),
+            },
+            is_error=True,
+        )
+
+    return _tool_text(
+        {
+            "catalog_version": catalog.catalog_version,
+            "filters": {
+                "command_ids": command_ids,
+                "intent": intent,
+                "outcomes": outcomes,
+                "status": status,
+                "automated_allowed": automated_allowed,
+                "manual_allowed": manual_allowed,
+                "human_review_required": human_review_required,
+                "satellite_id": _optional_string(args.get("satellite_id")),
+                "report_id": _optional_string(args.get("report_id")),
+                "limit": limit,
+            },
+            "command_count": len(commands),
+            "commands": [
+                _catalog_command_payload(command)
+                for command in commands
+            ],
+        }
+    )
 
 @tool(
     "draft_satellite_command_plan",
     "Create a non-executable draft satellite command plan for human review.",
-    {"satellite_id": str, "objective": str, "constraints": str},
+    {
+        "type": "object",
+        "properties": {
+            "satellite_id": {
+                "type": "string",
+                "description": "Satellite identifier for the draft runbook plan.",
+            },
+            "objective": {
+                "type": "string",
+                "description": "Human-readable draft objective.",
+            },
+            "constraints": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Operational constraints for human review.",
+            },
+            "command_ids": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Catalog command IDs to include in order.",
+            },
+            "commands": {
+                "type": "array",
+                "items": {"type": "object"},
+                "description": (
+                    "Optional command objects containing catalog_command_id only, "
+                    "with target/command allowed only for catalog consistency checks."
+                ),
+            },
+            "catalog_command_id": {
+                "type": "string",
+                "description": "Optional single catalog command ID.",
+            },
+            "command_id": {
+                "type": "string",
+                "description": "Optional single catalog command ID.",
+            },
+            "target": {
+                "type": "string",
+                "description": "Optional target consistency check for a single catalog command.",
+            },
+            "command": {
+                "type": "string",
+                "description": "Optional command consistency check for a single catalog command.",
+            },
+        },
+        "additionalProperties": False,
+    },
 )
 async def draft_satellite_command_plan(args):
-    # This should produce a reviewed draft, not uplink-ready commands.
-    return {
-        "content": [
+    args = args or {}
+    try:
+        catalog = load_command_catalog()
+        commands = _validate_plan_entries(_plan_command_entries(args))
+        rendered_runbook = None
+        runbook_rendering_error = None
+        try:
+            rendered_runbook = render_openc3_ruby_runbook(commands)
+        except ValueError as exc:
+            runbook_rendering_error = str(exc)
+    except Exception as exc:
+        return _tool_text(
             {
-                "type": "text",
-                "text": "Return draft command plan here.",
+                "error": "Failed to draft catalog-backed satellite command plan.",
+                "detail": str(exc),
+                "plan_status": DRAFT_REVIEW_STATUS,
+            },
+            is_error=True,
+        )
+
+    plan = {
+        "plan_status": DRAFT_REVIEW_STATUS,
+        "policy_version": POLICY_VERSION,
+        "catalog_version": catalog.catalog_version,
+        "satellite_id": _optional_string(args.get("satellite_id")),
+        "objective": _optional_string(args.get("objective")),
+        "constraints": _string_list(args.get("constraints")),
+        "human_review_required": True,
+        "execution_allowed": False,
+        "review_note": (
+            "DRAFT / HUMAN REVIEW REQUIRED. Do not execute until an authorized "
+            "operator verifies catalog IDs, preconditions, and telemetry verifiers."
+        ),
+        "command_count": len(commands),
+        "commands": [
+            {
+                "step": index,
+                **_catalog_command_payload(command),
             }
-        ]
+            for index, command in enumerate(commands, start=1)
+        ],
+        "ruby_runbook": rendered_runbook,
+        "ruby_runbook_error": runbook_rendering_error,
     }
+    return _tool_text(plan)
+
+
+get_satellite_commands = get_satellite_command
 
 
 soteria_tools_server = create_sdk_mcp_server(
@@ -380,7 +749,7 @@ soteria_tools_server = create_sdk_mcp_server(
     tools=[
         get_event_windows,
         get_user_satellites,
-        get_satellite_commands,
+        get_satellite_command,
         draft_satellite_command_plan,
     ],
 )

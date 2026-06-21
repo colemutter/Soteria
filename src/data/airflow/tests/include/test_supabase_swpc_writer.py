@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import os
 import sys
 import unittest
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 
 AIRFLOW_ROOT = Path(__file__).resolve().parents[2]
@@ -86,6 +88,61 @@ class TestSupabaseSwpcWriter(unittest.TestCase):
         writer = SupabaseSwpcWriter(url="https://example.supabase.co", key="test", chunk_size=2)
         writer._client = client
         return writer
+
+    def test_reads_supabase_config_from_airflow_variables_when_env_is_unset(self) -> None:
+        variables = {
+            "SUPABASE_URL": "https://variables.supabase.co",
+            "SUPABASE_KEY": "variable-key",
+        }
+
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch(
+                "include.supabase_swpc_writer._get_airflow_variable",
+                side_effect=lambda key: variables.get(key),
+            ),
+        ):
+            writer = SupabaseSwpcWriter()
+
+        self.assertEqual(writer.url, "https://variables.supabase.co")
+        self.assertEqual(writer.key, "variable-key")
+
+    def test_env_supabase_config_takes_precedence_over_airflow_variables(self) -> None:
+        variables = {
+            "SUPABASE_URL": "https://variables.supabase.co",
+            "SUPABASE_KEY": "variable-key",
+        }
+
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "SUPABASE_URL": "https://env.supabase.co",
+                    "SUPABASE_KEY": "env-key",
+                },
+                clear=True,
+            ),
+            patch(
+                "include.supabase_swpc_writer._get_airflow_variable",
+                side_effect=lambda key: variables.get(key),
+            ),
+        ):
+            writer = SupabaseSwpcWriter()
+
+        self.assertEqual(writer.url, "https://env.supabase.co")
+        self.assertEqual(writer.key, "env-key")
+
+    def test_missing_supabase_config_raises_runtime_error(self) -> None:
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch("include.supabase_swpc_writer._get_airflow_variable", return_value=None),
+        ):
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "SUPABASE_URL and SUPABASE_KEY must be configured as environment "
+                "variables or Airflow Variables",
+            ):
+                SupabaseSwpcWriter()
 
     def test_raw_payload_upsert_returns_requested_id(self) -> None:
         client = FakeClient()

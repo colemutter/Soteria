@@ -1,0 +1,26 @@
+apiVersion: run.googleapis.com/v1
+kind: WorkerPool
+metadata:
+  name: soteria-poller
+spec:
+  template:
+    spec:
+      containers:
+        - image: us-central1-docker.pkg.dev/soteria-500103/soteria/backend-poller:latest
+          env:
+            - name: LOG_LEVEL
+              value: INFO
+            - name: REDIS_URL
+              value: redis://REDIS_PRIVATE_IP:6379/0
+            - name: SOTERIA_REACTION_SERVICE_URL
+              value: https://BACKEND_SERVICE_URL/agent/reactions
+            - name: SUPABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: supabase-url
+                  key: latest
+            - name: SUPABASE_SERVICE_ROLE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: supabase-service-role-key
+                  key: latest

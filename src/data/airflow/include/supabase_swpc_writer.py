@@ -18,11 +18,18 @@ class SupabaseSwpcWriter:
         key: str | None = None,
         chunk_size: int | None = None,
     ) -> None:
-        self.url = url or os.getenv("SUPABASE_URL")
-        self.key = key or os.getenv("SUPABASE_KEY")
+        self.url = (
+            url or os.getenv("SUPABASE_URL") or _get_airflow_variable("SUPABASE_URL")
+        )
+        self.key = (
+            key or os.getenv("SUPABASE_KEY") or _get_airflow_variable("SUPABASE_KEY")
+        )
         self.chunk_size = chunk_size or int(os.getenv("SUPABASE_UPSERT_CHUNK_SIZE", "500"))
         if not self.url or not self.key:
-            raise RuntimeError("SUPABASE_URL and SUPABASE_KEY must be configured")
+            raise RuntimeError(
+                "SUPABASE_URL and SUPABASE_KEY must be configured as environment "
+                "variables or Airflow Variables"
+            )
         self._client: Any | None = None
 
     @property
@@ -152,6 +159,15 @@ class SupabaseSwpcWriter:
 
 def _chunks(rows: list[dict[str, Any]], size: int) -> list[list[dict[str, Any]]]:
     return [rows[index : index + size] for index in range(0, len(rows), size)]
+
+
+def _get_airflow_variable(key: str) -> str | None:
+    try:
+        from airflow.sdk import Variable
+    except ImportError:
+        return None
+
+    return Variable.get(key, default=None)
 
 
 __all__ = ["SupabaseSwpcWriter"]

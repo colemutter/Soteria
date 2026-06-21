@@ -1,4 +1,4 @@
-import type { SatelliteAlert } from '../lib/alerts'
+import { formatEventWindow, type SatelliteAlert } from '../lib/alerts'
 import { DangerIcon } from './DangerIcon'
 
 /**
@@ -16,6 +16,15 @@ export function SatelliteAlerts({ alerts }: { alerts: SatelliteAlert[] }) {
             <span className="sat-alert-name">{a.title}</span>
             <span className={`sat-alert-risk lvl-${a.level}`}>{a.riskLabel}</span>
           </div>
+
+          {formatEventWindow(a.eventWindow) && (
+            <div className="sat-alert-window">
+              <span className="sat-alert-window-label">Event window</span>
+              <span className="sat-alert-window-range">
+                {formatEventWindow(a.eventWindow)}
+              </span>
+            </div>
+          )}
 
           {(a.rationale || a.summary) && (
             <p className="sat-alert-desc">{a.rationale || a.summary}</p>

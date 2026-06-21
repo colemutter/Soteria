@@ -53,6 +53,17 @@ export interface SatelliteAlert {
   createdAt: string | null
   /** Space-weather event window this alert belongs to (for "danger passed"). */
   eventWindowId: string | null
+  /** Resolved timing of that event window, when known. */
+  eventWindow: EventWindowInfo | null
+}
+
+/** Timing of a space-weather event window. */
+export interface EventWindowInfo {
+  start: string | null
+  peak: string | null
+  end: string | null
+  /** `end` parsed to epoch ms (null when unparseable) — used to detect "passed". */
+  endMs: number | null
 }
 
 const LEVEL_RANK: Record<DangerLevel, number> = { safe: 0, caution: 1, critical: 2 }
@@ -211,6 +222,7 @@ function runbookToAlert(row: RunbookRow): SatelliteAlert | null {
     commands: asArray(row.commands).map(commandToItem),
     createdAt: row.created_at,
     eventWindowId: row.event_window_id,
+    eventWindow: null,
   }
 }
 
@@ -242,35 +254,76 @@ function reportToAlerts(row: ReportRow): SatelliteAlert[] {
       commands: [],
       createdAt: row.created_at,
       eventWindowId,
+      eventWindow: null,
     })
   })
   return out
 }
 
+/** Format an event window as a compact UTC timeframe, or null if unavailable. */
+export function formatEventWindow(win: EventWindowInfo | null): string | null {
+  if (!win?.start || !win.end) return null
+  const s = new Date(win.start)
+  const e = new Date(win.end)
+  if (Number.isNaN(s.getTime()) || Number.isNaN(e.getTime())) return null
+  const day = (d: Date) =>
+    d.toLocaleDateString('en-US', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+      timeZone: 'UTC',
+    })
+  const hm = (d: Date) =>
+    d.toLocaleTimeString('en-GB', {
+      hour: '2-digit',
+      minute: '2-digit',
+      timeZone: 'UTC',
+    })
+  const sameDay =
+    s.getUTCFullYear() === e.getUTCFullYear() &&
+    s.getUTCMonth() === e.getUTCMonth() &&
+    s.getUTCDate() === e.getUTCDate()
+  return sameDay
+    ? `${day(s)} · ${hm(s)}–${hm(e)} UTC`
+    : `${day(s)} ${hm(s)} → ${day(e)} ${hm(e)} UTC`
+}
+
 /**
- * Fetch the end times of the given event windows, keyed by id. Used to drop
- * alerts whose danger has already passed. The stored `status` column can lag, so
- * we compare `window_end` to "now" directly. Returns an empty map on error so
- * filtering fails open (alerts are kept rather than wrongly hidden).
+ * Fetch the timing of the given event windows, keyed by id. Used both to show
+ * each alert's timeframe and to drop alerts whose danger has already passed. The
+ * stored `status` column can lag, so we compare `window_end` to "now" directly.
+ * Returns an empty map on error so filtering fails open (alerts are kept rather
+ * than wrongly hidden).
  */
-async function fetchEventWindowEnds(
+async function fetchEventWindows(
   ids: string[],
-): Promise<Map<string, number>> {
-  const ends = new Map<string, number>()
-  if (!supabase || ids.length === 0) return ends
+): Promise<Map<string, EventWindowInfo>> {
+  const windows = new Map<string, EventWindowInfo>()
+  if (!supabase || ids.length === 0) return windows
   const { data, error } = await supabase
     .from('space_weather_event_windows')
-    .select('id,window_end')
+    .select('id,window_start,peak_time,window_end')
     .in('id', ids)
   if (error) {
     console.error('[alerts] event-window query failed', error)
-    return ends
+    return windows
   }
-  for (const row of (data ?? []) as { id: string; window_end: string }[]) {
-    const t = Date.parse(row.window_end)
-    if (!Number.isNaN(t)) ends.set(row.id, t)
+  type WindowRow = {
+    id: string
+    window_start: string | null
+    peak_time: string | null
+    window_end: string | null
   }
-  return ends
+  for (const row of (data ?? []) as WindowRow[]) {
+    const endMs = row.window_end ? Date.parse(row.window_end) : NaN
+    windows.set(row.id, {
+      start: row.window_start,
+      peak: row.peak_time,
+      end: row.window_end,
+      endMs: Number.isNaN(endMs) ? null : endMs,
+    })
+  }
+  return windows
 }
 
 // How many recent rows to pull. Runbooks are per-satellite/per-event so we want
@@ -325,20 +378,28 @@ export async function fetchSatelliteAlerts(demo = false): Promise<SatelliteAlert
     reportToAlerts,
   )
 
-  // Drop alerts whose event window has already ended ("danger has passed").
-  // Filter BEFORE de-duping so a satellite whose newest alert has passed can
-  // still surface an older alert that's still active.
+  // Resolve event-window timing for every candidate, then attach it so the UI
+  // can show each alert's timeframe.
+  const candidates = [...runbookAlerts, ...reportAlerts]
   const windowIds = uniq(
-    [...runbookAlerts, ...reportAlerts]
+    candidates
       .map((a) => a.eventWindowId)
       .filter((id): id is string => !!id),
   )
-  const ends = await fetchEventWindowEnds(windowIds)
+  const windows = await fetchEventWindows(windowIds)
+  for (const a of candidates) {
+    a.eventWindow = a.eventWindowId
+      ? windows.get(a.eventWindowId) ?? null
+      : null
+  }
+
+  // Drop alerts whose event window has already ended ("danger has passed").
+  // Filter BEFORE de-duping so a satellite whose newest alert has passed can
+  // still surface an older alert that's still active.
   const now = Date.now()
   const isActive = (a: SatelliteAlert) => {
-    if (!a.eventWindowId) return true // unknown timing — keep it
-    const end = ends.get(a.eventWindowId)
-    return end === undefined || end >= now // keep if window unknown or not ended
+    const endMs = a.eventWindow?.endMs
+    return endMs == null || endMs >= now // keep if timing unknown or not ended
   }
 
   const alerts: SatelliteAlert[] = []

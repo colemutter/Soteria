@@ -789,6 +789,25 @@
 .sat-alert-risk.lvl-safe {
   color: #7fe3a8;
 }
+.sat-alert-window {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  margin-top: 9px;
+}
+.sat-alert-window-label {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: #7e8aa6;
+}
+.sat-alert-window-range {
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  color: #cdd5e6;
+}
 .sat-alert-desc {
   margin: 8px 0 0;
   font-size: 11.5px;

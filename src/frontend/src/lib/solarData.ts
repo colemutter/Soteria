@@ -32,6 +32,8 @@ export interface SolarDataset {
   kpSeries: Series
   bzSeries: Series
   btSeries: Series
+  /** Solar-wind bulk speed (km/s); used to propagate the L1 IMF to Earth. */
+  speedSeries: Series
 }
 
 interface ForecastRow {
@@ -94,6 +96,49 @@ export function resampleSeries(
   return out
 }
 
+/**
+ * Nominal Sun–Earth L1 distance (km). The solar wind (and the IMF frozen into
+ * it) is measured at L1, ~1.5M km sunward, and reaches Earth ~D/speed seconds
+ * later — roughly 30–100 min depending on wind speed.
+ */
+export const L1_DISTANCE_KM = 1.5e6
+
+/** Floor on wind speed (km/s) when computing transit time, so a dropout or zero
+ * reading can't blow the propagation delay up to hours. */
+const MIN_WIND_SPEED = 150
+
+/**
+ * Shift an L1-observed series forward to its arrival time at Earth: each sample's
+ * value is unchanged, but its timestamp moves by `L1_DISTANCE_KM / speed`, using
+ * the wind speed measured at that same instant (interpolated, falling back to
+ * `fallbackSpeed` when no plasma data exists). The result is re-sorted by arrival
+ * time, turning the last ~hour of L1 data into a short-range Earth forecast.
+ */
+export function propagateToEarth(
+  series: Series,
+  speed: Series,
+  fallbackSpeed = 400,
+): Series {
+  if (series.length === 0) return []
+  return series
+    .map((p) => {
+      const v = Math.max(MIN_WIND_SPEED, interp(speed, p.t, fallbackSpeed))
+      return { t: p.t + (L1_DISTANCE_KM / v) * 1000, v: p.v }
+    })
+    .sort((a, b) => a.t - b.t)
+}
+
+/** L1→Earth transit time (ms) at the wind speed interpolated at `t` — i.e. the
+ * IMF forecast lead at that instant. */
+export function propagationLeadMs(
+  speed: Series,
+  t: number,
+  fallbackSpeed = 400,
+): number {
+  const v = Math.max(MIN_WIND_SPEED, interp(speed, t, fallbackSpeed))
+  return (L1_DISTANCE_KM / v) * 1000
+}
+
 /** Conditions at a given instant, interpolated from each driver's series. */
 export function conditionsAt(ds: SolarDataset, date: Date): SolarConditions {
   const t = date.getTime()
@@ -111,6 +156,10 @@ const PAGE = 1000 // PostgREST caps each request at 1000 rows
 // (endpoint, valid_start). Filtering by endpoint is ~20× faster than by
 // product_type (which can't use the index) and returns exactly Bz + Bt.
 const MAG_ENDPOINT = '/json/rtsw/rtsw_mag_1m.json'
+// Solar-wind bulk speed, used only to time the L1→Earth propagation. The 6-hour
+// product is a small, indexed table that easily covers the recent window whose
+// IMF gets propagated into the (near) future.
+const PLASMA_ENDPOINT = '/products/solar-wind/plasma-6-hour.json'
 
 /**
  * Fetch the magnetic-field rows newest-first. With `full`, page through the
@@ -149,15 +198,30 @@ async function fetchMagRows(
   return out
 }
 
+/** Latest page of solar-wind speed rows (newest-first) for L1 propagation. */
+async function fetchSpeedRows(table: string): Promise<ForecastRow[]> {
+  if (!supabase) return []
+  const isDemo = table.endsWith('_demo')
+  const base = supabase.from(table).select('product_type,value,valid_start')
+  const filtered = isDemo
+    ? base.eq('product_type', 'solar_wind_plasma_speed')
+    : base.eq('endpoint', PLASMA_ENDPOINT)
+  const { data } = await filtered
+    .order('valid_start', { ascending: false })
+    .limit(PAGE)
+  return (data ?? []) as ForecastRow[]
+}
+
 async function fetchFromTable(
   table: string,
   full = false,
 ): Promise<SolarDataset | null> {
   if (!supabase) return null
-  // Query Kp and the magnetic field separately, NEWEST-FIRST: the IMF products
-  // are high-cadence, so a single ascending+limit query would return the oldest
-  // rows and drop both the recent observations and the Kp forecast.
-  const [kpRes, magRows] = await Promise.all([
+  // Query Kp, the magnetic field, and the wind speed separately, NEWEST-FIRST:
+  // the IMF products are high-cadence, so a single ascending+limit query would
+  // return the oldest rows and drop both the recent observations and the Kp
+  // forecast.
+  const [kpRes, magRows, speedRows] = await Promise.all([
     supabase
       .from(table)
       .select('product_type,value,valid_start')
@@ -165,6 +229,7 @@ async function fetchFromTable(
       .order('valid_start', { ascending: false })
       .limit(1500),
     fetchMagRows(table, full),
+    fetchSpeedRows(table),
   ])
   if (kpRes.error) return null
   const kpRows = (kpRes.data ?? []) as ForecastRow[]
@@ -177,6 +242,7 @@ async function fetchFromTable(
     kpSeries: kp,
     bzSeries: buildSeries(magRows, 'solar_wind_mag_bz_gsm'),
     btSeries: buildSeries(magRows, 'solar_wind_mag_bt'),
+    speedSeries: buildSeries(speedRows, 'solar_wind_plasma_speed'),
   }
 }
 
@@ -196,14 +262,16 @@ function generateDemoSeries(): SolarDataset {
   const kpSeries: Series = []
   const bzSeries: Series = []
   const btSeries: Series = []
+  const speedSeries: Series = []
   for (let h = 0; h <= 48; h++) {
     const t = now + h * HOUR
     const ramp = Math.max(0, h - 24) / 24 // 0 first day, → 1 over the second
     kpSeries.push({ t, v: Math.min(9, 2 + 7 * ramp) })
     bzSeries.push({ t, v: 3 - 31 * ramp })
     btSeries.push({ t, v: 5 + 30 * ramp })
+    speedSeries.push({ t, v: 380 + 420 * ramp }) // 380 → 800 km/s as the storm hits
   }
-  return { kpSeries, bzSeries, btSeries }
+  return { kpSeries, bzSeries, btSeries, speedSeries }
 }
 
 /** Demo data from the demo table, re-anchored to start "now"; falls back to the
@@ -218,6 +286,7 @@ async function fetchDemoDataset(): Promise<SolarDataset> {
     kpSeries: anchorSeries(ds.kpSeries, shift),
     bzSeries: anchorSeries(ds.bzSeries, shift),
     btSeries: anchorSeries(ds.btSeries, shift),
+    speedSeries: anchorSeries(ds.speedSeries, shift),
   }
 }
 

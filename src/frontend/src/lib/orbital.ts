@@ -1,4 +1,12 @@
-import * as satellite from 'satellite.js'
+import {
+  degreesLat,
+  degreesLong,
+  eciToGeodetic,
+  gstime,
+  propagate,
+  twoline2satrec,
+  type SatRec as SatelliteSatRec,
+} from 'satellite.js'
 import { Vector3 } from 'three'
 
 /**
@@ -25,7 +33,7 @@ export const KM_TO_SCENE = SCENE_EARTH_RADIUS / EARTH_RADIUS_KM
  */
 export const TEXTURE_LON_OFFSET = 0
 
-export type SatRec = ReturnType<typeof satellite.twoline2satrec>
+export type SatRec = SatelliteSatRec
 
 export interface GeodeticInfo {
   latitudeDeg: number
@@ -36,7 +44,7 @@ export interface GeodeticInfo {
 
 /** Parse a TLE into a propagatable satrec. Throws if the TLE is unusable. */
 export function parseTle(line1: string, line2: string): SatRec {
-  const satrec = satellite.twoline2satrec(line1.trim(), line2.trim())
+  const satrec = twoline2satrec(line1.trim(), line2.trim())
   // satrec.error is set to a non-zero code by twoline2satrec on bad input.
   if (satrec.error) {
     throw new Error(`Invalid TLE (error code ${satrec.error})`)
@@ -55,7 +63,7 @@ function eciToVector3(p: { x: number; y: number; z: number }, target = new Vecto
 
 /** Current scene-space position of a satellite at the given date. Returns null if propagation fails. */
 export function positionAt(satrec: SatRec, date: Date, target = new Vector3()): Vector3 | null {
-  const pv = satellite.propagate(satrec, date)
+  const pv = propagate(satrec, date)
   const eci = pv?.position
   if (!eci || typeof eci === 'boolean') return null
   return eciToVector3(eci, target)
@@ -63,21 +71,21 @@ export function positionAt(satrec: SatRec, date: Date, target = new Vector3()): 
 
 /** Human-readable geodetic info (lat/lon/alt/speed) at the given date. */
 export function geodeticAt(satrec: SatRec, date: Date): GeodeticInfo | null {
-  const pv = satellite.propagate(satrec, date)
+  const pv = propagate(satrec, date)
   const eci = pv?.position
   const vel = pv?.velocity
   if (!eci || typeof eci === 'boolean') return null
 
-  const gmst = satellite.gstime(date)
-  const geo = satellite.eciToGeodetic(eci, gmst)
+  const gmst = gstime(date)
+  const geo = eciToGeodetic(eci, gmst)
   const speedKmS =
     vel && typeof vel !== 'boolean'
       ? Math.hypot(vel.x, vel.y, vel.z)
       : 0
 
   return {
-    latitudeDeg: satellite.degreesLat(geo.latitude),
-    longitudeDeg: satellite.degreesLong(geo.longitude),
+    latitudeDeg: degreesLat(geo.latitude),
+    longitudeDeg: degreesLong(geo.longitude),
     altitudeKm: geo.height,
     speedKmS,
   }
@@ -104,7 +112,7 @@ const MU_KM3_S2 = 398600.4418
  * Falls back to the mean-motion period if propagation can't supply a velocity.
  */
 export function osculatingPeriodMinutes(satrec: SatRec, date: Date): number {
-  const pv = satellite.propagate(satrec, date)
+  const pv = propagate(satrec, date)
   const pos = pv?.position
   const vel = pv?.velocity
   if (!pos || typeof pos === 'boolean' || !vel || typeof vel === 'boolean') {
@@ -131,7 +139,7 @@ export function osculatingPeriodMinutes(satrec: SatRec, date: Date): number {
 export function maxOrbitRadiusScene(satrecs: SatRec[], date: Date): number {
   let maxScene = 0
   for (const satrec of satrecs) {
-    const pv = satellite.propagate(satrec, date)
+    const pv = propagate(satrec, date)
     const pos = pv?.position
     const vel = pv?.velocity
     if (!pos || typeof pos === 'boolean' || !vel || typeof vel === 'boolean') continue
@@ -183,5 +191,5 @@ export function sampleOrbit(satrec: SatRec, date: Date, segments = 256): Vector3
 
 /** Earth mesh rotation (radians, about Y) that aligns geography for a given date. */
 export function earthRotationY(date: Date): number {
-  return satellite.gstime(date) + TEXTURE_LON_OFFSET
+  return gstime(date) + TEXTURE_LON_OFFSET
 }

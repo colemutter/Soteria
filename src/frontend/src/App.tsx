@@ -25,7 +25,10 @@ function App() {
   // Mirror the list into a ref so the refresh interval reads the latest without
   // resetting the timer every time a satellite is added.
   const satellitesRef = useRef(satellites)
-  satellitesRef.current = satellites
+
+  useEffect(() => {
+    satellitesRef.current = satellites
+  }, [satellites])
 
   /**
    * Add a theoretical satellite from a name + TLE. Returns the created entry so

@@ -9,6 +9,8 @@ import {
   type SatelliteEntry,
 } from './data/satellites'
 import { fetchTleById, type TleRecord } from './lib/tleApi'
+import { syncSatellites } from './lib/satelliteSync'
+import { simClock } from './lib/simClock'
 import './App.css'
 
 /** How often to re-fetch live elements for `real` satellites. */
@@ -41,6 +43,7 @@ function App() {
     if (!entry.error) {
       setSatellites((prev) => [...prev, entry])
       setSelectedId(entry.id)
+      void syncSatellites([entry], simClock.date) // immediate DB write on add
     }
     return entry
   }
@@ -54,39 +57,49 @@ function App() {
     const existing = satellitesRef.current.find((s) => s.id === entry.id)
     if (existing) {
       setSelectedId(existing.id)
+      void syncSatellites([existing], simClock.date) // refresh its row
       return existing
     }
     if (!entry.error) {
       setSatellites((prev) => [...prev, entry])
       setSelectedId(entry.id)
+      void syncSatellites([entry], simClock.date) // immediate DB write on add
     }
     return entry
   }
 
-  // Periodically refresh the orbital elements of every real satellite so their
-  // trajectories stay current (positions are propagated locally each frame).
+  // Mirror the initial (built-in) list to the DB once on load.
+  useEffect(() => {
+    void syncSatellites(satellitesRef.current, simClock.date)
+  }, [])
+
+  // Every ~10 min: refresh real satellites' elements, then mirror the whole list
+  // to Supabase with current positions (the DB write follows the live update).
   useEffect(() => {
     const refresh = async () => {
-      const reals = satellitesRef.current.filter(
-        (s) => s.kind === 'real' && s.noradId != null,
-      )
-      if (reals.length === 0) return
-      const updates = await Promise.all(
-        reals.map(async (s) => {
-          try {
-            const rec = await fetchTleById(s.noradId!)
-            return { id: s.id, rec }
-          } catch {
-            return null // keep the old elements if a refresh fails
-          }
-        }),
-      )
-      setSatellites((prev) =>
-        prev.map((p) => {
+      const current = satellitesRef.current
+      const reals = current.filter((s) => s.kind === 'real' && s.noradId != null)
+      let next = current
+      if (reals.length > 0) {
+        const updates = await Promise.all(
+          reals.map(async (s) => {
+            try {
+              const rec = await fetchTleById(s.noradId!)
+              return { id: s.id, rec }
+            } catch {
+              return null // keep the old elements if a refresh fails
+            }
+          }),
+        )
+        next = current.map((p) => {
           const u = updates.find((x) => x && x.id === p.id)
-          return u ? updateSatelliteTle(p, u.rec.line1, u.rec.line2, u.rec.date) : p
-        }),
-      )
+          return u
+            ? updateSatelliteTle(p, u.rec.line1, u.rec.line2, u.rec.date)
+            : p
+        })
+        setSatellites(next)
+      }
+      await syncSatellites(next, simClock.date)
     }
     const id = setInterval(refresh, REAL_REFRESH_MS)
     return () => clearInterval(id)

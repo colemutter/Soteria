@@ -18,9 +18,14 @@ for path in (AIRFLOW_ROOT, DATA_ROOT):
 from include.swpc.endpoints import (  # noqa: E402
     ASSET_SPECIFIC_PROTECTION_ENDPOINTS,
     MINIMAL_PROTECTION_ENDPOINTS,
+    SOLAR_WIND_PRODUCT_ENDPOINTS,
     SWPC_ENDPOINTS,
 )
-from classifier import classify_endpoint, classify_rows, normalize_payload  # noqa: E402
+from include.swpc.classifier import (  # noqa: E402
+    classify_endpoint,
+    classify_rows,
+    normalize_payload,
+)
 
 
 def _official_scale_summary(endpoint: str, payload: Any) -> list[dict[str, Any]]:
@@ -224,6 +229,22 @@ EXAMPLE_CASES = [
     },
 ]
 
+SOLAR_WIND_PRODUCT_PATHS = [
+    "/products/solar-wind/ephemerides.json",
+    "/products/solar-wind/mag-1-day.json",
+    "/products/solar-wind/mag-2-hour.json",
+    "/products/solar-wind/mag-3-day.json",
+    "/products/solar-wind/mag-5-minute.json",
+    "/products/solar-wind/mag-6-hour.json",
+    "/products/solar-wind/mag-7-day.json",
+    "/products/solar-wind/plasma-1-day.json",
+    "/products/solar-wind/plasma-2-hour.json",
+    "/products/solar-wind/plasma-3-day.json",
+    "/products/solar-wind/plasma-5-minute.json",
+    "/products/solar-wind/plasma-6-hour.json",
+    "/products/solar-wind/plasma-7-day.json",
+]
+
 
 class SwpcEndpointExamplesTest(unittest.TestCase):
     def test_catalog_contains_minimal_then_asset_specific_endpoints(self) -> None:
@@ -231,8 +252,8 @@ class SwpcEndpointExamplesTest(unittest.TestCase):
         after = [asdict(endpoint) for endpoint in SWPC_ENDPOINTS]
 
         self.assertEqual(len(MINIMAL_PROTECTION_ENDPOINTS), 9)
-        self.assertEqual(len(ASSET_SPECIFIC_PROTECTION_ENDPOINTS), 10)
-        self.assertEqual(len(SWPC_ENDPOINTS), 19)
+        self.assertEqual(len(ASSET_SPECIFIC_PROTECTION_ENDPOINTS), 23)
+        self.assertEqual(len(SWPC_ENDPOINTS), 32)
         self.assertEqual(
             before[:3],
             [
@@ -251,6 +272,19 @@ class SwpcEndpointExamplesTest(unittest.TestCase):
             all(
                 endpoint["protection_tier"] == "asset_specific"
                 for endpoint in after[len(MINIMAL_PROTECTION_ENDPOINTS) :]
+            )
+        )
+
+    def test_catalog_contains_all_solar_wind_product_endpoints(self) -> None:
+        solar_wind_paths = [endpoint.path for endpoint in SOLAR_WIND_PRODUCT_ENDPOINTS]
+        all_paths = [endpoint.path for endpoint in SWPC_ENDPOINTS]
+
+        self.assertEqual(solar_wind_paths, SOLAR_WIND_PRODUCT_PATHS)
+        self.assertTrue(set(SOLAR_WIND_PRODUCT_PATHS).issubset(all_paths))
+        self.assertTrue(
+            all(
+                endpoint.protection_tier == "asset_specific"
+                for endpoint in SOLAR_WIND_PRODUCT_ENDPOINTS
             )
         )
 

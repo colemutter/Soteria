@@ -147,7 +147,7 @@ class CommandRunbookGenerationTest(unittest.TestCase):
             "sample_disable",
         )
 
-    def test_policy_no_action_and_missing_finding_emit_no_action_rows(self) -> None:
+    def test_policy_commandability_check_and_missing_finding_emit_expected_rows(self) -> None:
         report = report_with_findings(
             finding("sat-1", SatelliteOutcome.PAYLOAD_NOISE),
             finding("sat-2", SatelliteOutcome.INCREASED_DRAG),
@@ -158,16 +158,22 @@ class CommandRunbookGenerationTest(unittest.TestCase):
             active_satellites(),
             report_id="report-row-1",
         )
-        policy_no_action = self._row_for_satellite(rows, "sat-2")
+        policy_command = self._row_for_satellite(rows, "sat-2")
         no_finding = self._row_for_satellite(rows, "sat-3")
 
-        self.assertEqual(policy_no_action["status"], "no_action")
-        self.assertEqual(policy_no_action["commands"], [])
-        self.assertEqual(policy_no_action["risk_level"], "medium")
-        self.assertTrue(policy_no_action["metadata"]["human_review_required"])
+        self.assertEqual(policy_command["status"], "generated")
+        self.assertEqual(policy_command["risk_level"], "low")
+        self.assertFalse(policy_command["metadata"]["human_review_required"])
+        self.assertEqual(
+            [
+                command["catalog_command_id"]
+                for command in policy_command["commands"]
+            ],
+            ["cfs_noop"],
+        )
         self.assertIn(
-            "no catalogued NOS3 maneuver",
-            policy_no_action["metadata"]["no_action_reason"],
+            "commandability check",
+            policy_command["metadata"]["selected_command_reasons"][0]["reason"],
         )
 
         self.assertEqual(no_finding["status"], "no_action")
@@ -255,12 +261,18 @@ class CommandRunbookGenerationTest(unittest.TestCase):
         )
 
         recovered = self._row_for_satellite(rows, "sat-1")
-        manual_review = self._row_for_satellite(rows, "sat-2")
+        commandability_check = self._row_for_satellite(rows, "sat-2")
         self.assertEqual(
             [command["catalog_command_id"] for command in recovered["commands"]],
             ["radio_resume_output"],
         )
-        self.assertEqual(manual_review["status"], "no_action")
+        self.assertEqual(
+            [
+                command["catalog_command_id"]
+                for command in commandability_check["commands"]
+            ],
+            ["cfs_noop"],
+        )
 
     def _row_for_satellite(
         self,

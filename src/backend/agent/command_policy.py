@@ -222,6 +222,19 @@ def recommend_command_policy_for_finding(
                 ),
             )
         )
+        if command_id == "adcs_set_sunsafe":
+            selections.append(
+                _selection(
+                    "cfs_noop",
+                    command_catalog,
+                    reason=(
+                        "Reviewed ADCS sun-safe posture is paired with a "
+                        "low-risk cFS commandability check for operator demo "
+                        "and simulator verification."
+                    ),
+                    risk_level=CommandPolicyRiskLevel.LOW,
+                )
+            )
 
     if _has_any_outcome(
         outcomes,

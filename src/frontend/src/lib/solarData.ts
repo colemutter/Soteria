@@ -26,7 +26,7 @@ export const DEFAULT_CONDITIONS: SolarConditions = {
 }
 
 /** A driver's value over time: { t: ms epoch, v: value }, sorted ascending. */
-type Series = { t: number; v: number }[]
+export type Series = { t: number; v: number }[]
 
 export interface SolarDataset {
   kpSeries: Series
@@ -68,6 +68,30 @@ function interp(s: Series, t: number, fallback: number): number {
   const b = s[hi]
   const f = b.t === a.t ? 0 : (t - a.t) / (b.t - a.t)
   return a.v + (b.v - a.v) * f
+}
+
+/**
+ * Resample `s` every `stepMs` across [a, b], linearly interpolating between real
+ * samples to fill gaps (e.g. the 3-hourly Kp forecast → a smooth curve). The
+ * span is clipped to the series' actual data range, so we never extrapolate past
+ * the first/last sample: a window that sits entirely beyond the data (e.g. a
+ * forward window over the observation-only IMF feed) returns []. Always includes
+ * the right edge so the resampled series spans the full available range.
+ */
+export function resampleSeries(
+  s: Series,
+  a: number,
+  b: number,
+  stepMs: number,
+): Series {
+  if (s.length === 0) return []
+  const from = Math.max(a, s[0].t)
+  const to = Math.min(b, s[s.length - 1].t)
+  if (to < from) return []
+  const out: Series = []
+  for (let t = from; t < to; t += stepMs) out.push({ t, v: interp(s, t, s[0].v) })
+  out.push({ t: to, v: interp(s, to, s[0].v) })
+  return out
 }
 
 /** Conditions at a given instant, interpolated from each driver's series. */

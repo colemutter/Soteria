@@ -3,6 +3,7 @@ import { simClock } from '../lib/simClock'
 import {
   getSolarDataset,
   conditionsAt,
+  resampleSeries,
   type SolarDataset,
 } from '../lib/solarData'
 
@@ -10,10 +11,13 @@ import {
  * "Space Weather" screen: time-series charts of the geomagnetic Kp index and the
  * interplanetary magnetic field (Bz/Bt) — the same data driving the solar-wind
  * and auroral layers (and the demo storm when demo mode is on). A vertical "now"
- * marker separates observed history from forecast.
+ * marker sits at the left edge; both charts look 2 days into the future.
  *
- * Each chart sets its own time window: Kp reaches into the 2-day forecast; the
- * IMF is observation-only, so it shows just the recent past.
+ * Both charts share a now → +2d window and are resampled to a fixed cadence, so
+ * sparse forecast points (Kp is issued 3-hourly) read as a continuous series.
+ * Resampling never extrapolates past the real data, so a series without a
+ * forecast (the live IMF feed is observation-only) reads empty until data exists;
+ * the demo storm carries a full 2-day profile for every driver.
  */
 
 const HOUR = 3600 * 1000
@@ -44,13 +48,6 @@ type Pt = { t: number; v: number }
 interface Tick {
   t: number
   label: string
-}
-
-/** Cap a series to ~`max` evenly-strided points (keeps charts readable). */
-function downsample(pts: Pt[], max: number): Pt[] {
-  if (pts.length <= max) return pts
-  const stride = Math.ceil(pts.length / max)
-  return pts.filter((_, i) => i % stride === 0)
 }
 
 /** Relative-time label, e.g. "−1d", "−6h", "now", "+12h", "+2d". */
@@ -102,24 +99,9 @@ export function WeatherView({ demo }: { demo: boolean }) {
   const cur = ds ? conditionsAt(ds, simClock.date) : null
   const g = cur ? gLevel(cur.kp) : null
 
-  // One shared window for both charts, capped to the hours of data that exist.
-  // The high-cadence IMF is the binding series, so the window spans its range
-  // (ending at "now" for the live feed; the demo data runs now → +2 days).
-  const magAll = ds ? [...ds.bzSeries, ...ds.btSeries] : []
-  const allT = ds ? [...magAll, ...ds.kpSeries].map((p) => p.t) : []
-  let t0 = now - 24 * HOUR
-  let t1 = now
-  if (magAll.length) {
-    t0 = Math.min(...magAll.map((p) => p.t))
-    t1 = Math.max(now, ...magAll.map((p) => p.t))
-  } else if (allT.length) {
-    t0 = Math.min(...allT)
-    t1 = Math.max(now, ...allT)
-  }
-  if (t1 - t0 < HOUR) {
-    t0 -= HOUR
-    t1 += HOUR
-  }
+  // One shared window for both charts: now → 2 days in the future.
+  const t0 = now
+  const t1 = now + 48 * HOUR
   const xs = (t: number) => M.l + clamp01((t - t0) / (t1 - t0)) * IW
   const ticks = relTicks(t0, t1, now)
   // Both charts use the same window.
@@ -127,18 +109,19 @@ export function WeatherView({ demo }: { demo: boolean }) {
   const xsi = xs
   const kpTicks: Tick[] = ticks
   const imfTicks: Tick[] = ticks
-  const inWin = (p: Pt) => p.t >= t0 && p.t <= t1
 
   // ---- Kp ----
+  // Resample the 3-hourly Kp forecast to a smooth hourly series across the window.
   const ysk = (v: number) => M.t + (1 - Math.min(9, Math.max(0, v)) / 9) * IH
-  const kpPts = ds ? downsample(ds.kpSeries.filter(inWin), 80) : []
+  const kpPts = ds ? resampleSeries(ds.kpSeries, t0, t1, HOUR) : []
   const barW = kpPts.length
     ? Math.max(2, Math.min(18, (IW / kpPts.length) * 0.8))
     : 4
 
   // ---- IMF ----
-  const bz = ds ? downsample(ds.bzSeries.filter(inWin), 500) : []
-  const bt = ds ? downsample(ds.btSeries.filter(inWin), 500) : []
+  // 15-min cadence; empty for the live feed (no future IMF), full in demo mode.
+  const bz = ds ? resampleSeries(ds.bzSeries, t0, t1, HOUR / 4) : []
+  const bt = ds ? resampleSeries(ds.btSeries, t0, t1, HOUR / 4) : []
   const imfVals = [...bz, ...bt].map((p) => p.v)
   const vMin = Math.min(-5, ...imfVals)
   const vMax = Math.max(12, ...imfVals)

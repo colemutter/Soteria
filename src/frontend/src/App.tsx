@@ -24,6 +24,12 @@ import './App.css'
 const REAL_REFRESH_MS = 10 * 60 * 1000 // ~10 minutes
 /** How often to re-fetch satellite alerts (runbooks + event reports). */
 const ALERTS_REFRESH_MS = 10 * 60 * 1000 // ~10 minutes
+/**
+ * Simulated agent "report generation" delay when ENTERING demo mode: the demo
+ * alerts are pre-generated, but we stall before showing them to mimic the time
+ * a real agent would take. Only applied on entry, not on exit.
+ */
+const DEMO_GENERATION_DELAY_MS = 30 * 1000 // ~30 seconds
 
 function App() {
   // Which top-level view is active. 'map' is the default globe view.
@@ -165,12 +171,23 @@ function App() {
         console.error('[alerts] fetch failed', e)
       }
     }
+    // Clear immediately on any toggle so stale alerts don't linger. Entering demo
+    // mode stalls (and shows a "generating" state) to mimic agent report time;
+    // exiting demo mode (and the initial load) refreshes right away.
     setAlerts([])
-    void load()
-    const id = setInterval(() => void load(), ALERTS_REFRESH_MS)
+    // Entering demo mode stalls (pane stays empty) to mimic agent report time, on
+    // every entry; exiting demo mode and the initial load refresh right away.
+    const delay = demoOn ? DEMO_GENERATION_DELAY_MS : 0
+    let intervalId: ReturnType<typeof setInterval> | undefined
+    const startId = setTimeout(() => {
+      if (!active) return
+      void load()
+      intervalId = setInterval(() => void load(), ALERTS_REFRESH_MS)
+    }, delay)
     return () => {
       active = false
-      clearInterval(id)
+      clearTimeout(startId)
+      if (intervalId) clearInterval(intervalId)
     }
   }, [demoOn])
 

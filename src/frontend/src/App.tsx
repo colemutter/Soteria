@@ -12,6 +12,7 @@ import {
 } from './data/satellites'
 import { fetchTleById, type TleRecord } from './lib/tleApi'
 import { syncSatellites } from './lib/satelliteSync'
+import { rememberSatellite, fetchSavedSatellites } from './lib/savedSatellites'
 import { simClock } from './lib/simClock'
 import './App.css'
 
@@ -60,6 +61,7 @@ function App() {
     if (!entry.error) {
       setSatellites((prev) => [...prev, entry])
       setSatSelectedId(entry.id)
+      rememberSatellite(entry.id) // persist across reloads in this browser
       void syncSatellites([entry], simClock.date) // immediate DB write on add
     }
     return entry
@@ -74,16 +76,34 @@ function App() {
     const existing = satellitesRef.current.find((s) => s.id === entry.id)
     if (existing) {
       setSatSelectedId(existing.id)
+      rememberSatellite(existing.id)
       void syncSatellites([existing], simClock.date) // refresh its row
       return existing
     }
     if (!entry.error) {
       setSatellites((prev) => [...prev, entry])
       setSatSelectedId(entry.id)
+      rememberSatellite(entry.id) // persist across reloads in this browser
       void syncSatellites([entry], simClock.date) // immediate DB write on add
     }
     return entry
   }
+
+  // Restore satellites added in a previous visit (cached ids → DB rows).
+  useEffect(() => {
+    let active = true
+    void fetchSavedSatellites().then((saved) => {
+      if (!active || saved.length === 0) return
+      setSatellites((prev) => {
+        const seen = new Set(prev.map((s) => s.id))
+        const additions = saved.filter((s) => !seen.has(s.id))
+        return additions.length ? [...prev, ...additions] : prev
+      })
+    })
+    return () => {
+      active = false
+    }
+  }, [])
 
   // Mirror the initial (built-in) list to the DB once on load.
   useEffect(() => {

@@ -50,6 +50,8 @@ services:
           property: connectionString
       - key: SOTERIA_REACTION_SERVICE_URL
         value: https://soteria-backend.onrender.com/api/poller/report
+      - key: SOTERIA_REACTION_SERVICE_TIMEOUT_SECONDS
+        value: "420"
 
   - type: web
     name: soteria-frontend

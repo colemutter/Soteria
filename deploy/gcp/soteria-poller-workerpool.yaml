@@ -13,7 +13,7 @@ spec:
             - name: REDIS_URL
               value: redis://REDIS_PRIVATE_IP:6379/0
             - name: SOTERIA_REACTION_SERVICE_URL
-              value: https://BACKEND_SERVICE_URL/agent/reactions
+              value: https://BACKEND_SERVICE_URL/api/poller/report
             - name: SUPABASE_URL
               valueFrom:
                 secretKeyRef:

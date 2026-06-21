@@ -16,6 +16,11 @@ from include.supabase_swpc_writer import SupabaseSwpcWriter
 from include.swpc.endpoints import SWPC_ENDPOINTS
 from include.swpc.pipeline import ingest_endpoint, summarize_ingest
 
+RUN_TIMEOUT = dt.timedelta(minutes=30)
+RETRY_DELAY = dt.timedelta(seconds=10)
+RETRIES = 2
+
+
 
 @dag(
     dag_id="swpc_realtime_etl",
@@ -23,8 +28,8 @@ from include.swpc.pipeline import ingest_endpoint, summarize_ingest
     start_date=pendulum.datetime(2026, 1, 1, tz="UTC"),
     catchup=False,
     max_active_runs=1,
-    dagrun_timeout=dt.timedelta(minutes=9),
-    default_args={"retries": 2, "retry_delay": dt.timedelta(seconds=10)},
+    dagrun_timeout=RUN_TIMEOUT,
+    default_args={"retries": RETRIES, "retry_delay": RETRY_DELAY},
     tags=["swpc", "space-weather", "near-real-time"],
 )
 def swpc_realtime_etl():

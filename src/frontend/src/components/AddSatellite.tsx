@@ -108,7 +108,7 @@ export function AddSatellite({ onAddTheoretical, onAddReal }: Props) {
               className="add-sat-choice"
               onClick={() => setAddMode('theoretical')}
             >
-              <span className="add-sat-choice-title">Theoretical</span>
+              <span className="add-sat-choice-title">Custom</span>
               <span className="add-sat-choice-sub">Enter your own trajectory</span>
             </button>
           </div>

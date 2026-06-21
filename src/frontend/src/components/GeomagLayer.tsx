@@ -90,7 +90,7 @@ const fragmentShader = /* glsl */ `
   }
 `
 
-export function GeomagLayer() {
+export function GeomagLayer({ demo = false }: { demo?: boolean }) {
   const pointsRef = useRef<Points>(null)
   const matRef = useRef<ShaderMaterial>(null)
 
@@ -135,7 +135,7 @@ export function GeomagLayer() {
   useEffect(() => {
     let active = true
     const load = async () => {
-      const ds = await getSolarDataset()
+      const ds = await getSolarDataset(demo)
       if (active && ds) dataRef.current = ds
     }
     void load()
@@ -144,7 +144,7 @@ export function GeomagLayer() {
       active = false
       clearInterval(id)
     }
-  }, [])
+  }, [demo])
 
   const up = useMemo(() => new Vector3(0, 1, 0), [])
   const magAxis = useMemo(() => new Vector3(), [])

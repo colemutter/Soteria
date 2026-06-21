@@ -14,6 +14,8 @@ interface Props {
   onToggleSolarWind: () => void
   geomagOn: boolean
   onToggleGeomag: () => void
+  demoOn: boolean
+  onToggleDemo: () => void
 }
 
 /** Timeline span: the paused slider reaches this far into the future. */
@@ -40,6 +42,8 @@ export function Hud({
   onToggleSolarWind,
   geomagOn,
   onToggleGeomag,
+  demoOn,
+  onToggleDemo,
 }: Props) {
   // Re-render a few times a second to mirror the (mutable) clock in the UI.
   const [, force] = useState(0)
@@ -168,6 +172,21 @@ export function Hud({
           </div>
         )}
       </div>
+
+      {/* Bottom-left: demo-mode toggle */}
+      <button
+        className={`panel ui-toggle demo-toggle ${demoOn ? 'on' : ''}`}
+        onClick={onToggleDemo}
+        title="Demo storm: feeds a synthetic event that escalates to dangerous levels over 2 days — pause and scrub the timeline forward to see it peak"
+      >
+        <span className={`toggle-track ${demoOn ? 'on' : ''}`}>
+          <span className="toggle-knob" />
+        </span>
+        <span className="toggle-label">
+          Demo Storm
+          <span className="toggle-state">{demoOn ? 'ON' : 'OFF'}</span>
+        </span>
+      </button>
 
       {/* Bottom-right: layer toggles, grouped in one pane */}
       <div className="panel toggle-pane">

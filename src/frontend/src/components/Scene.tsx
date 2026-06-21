@@ -67,6 +67,7 @@ interface Props {
   shadingOn: boolean
   solarWindOn: boolean
   geomagOn: boolean
+  demoOn: boolean
 }
 
 export function Scene({
@@ -76,6 +77,7 @@ export function Scene({
   shadingOn,
   solarWindOn,
   geomagOn,
+  demoOn,
 }: Props) {
   const renderable = satellites.filter((s) => !s.error)
   const selected = satellites.find((s) => s.id === selectedId) ?? null
@@ -112,8 +114,8 @@ export function Scene({
       <Stars radius={300} depth={60} count={6000} factor={6} fade speed={0.4} />
 
       {/* Solar-wind particles driven by live space-weather data. */}
-      {solarWindOn && <SolarWind />}
-      {geomagOn && <GeomagLayer />}
+      {solarWindOn && <SolarWind demo={demoOn} />}
+      {geomagOn && <GeomagLayer demo={demoOn} />}
 
       <Suspense fallback={null}>
         <Earth shadingOn={shadingOn} />

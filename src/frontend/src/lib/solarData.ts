@@ -1,14 +1,14 @@
 import { supabase } from './supabase'
 
 /**
- * Current space-weather drivers, read from the SWPC tables in Supabase and used
- * to drive the solar-wind particle visualization.
+ * Space-weather drivers read from the SWPC tables in Supabase and used to drive
+ * the solar-wind and geomagnetic (auroral) visualizations:
+ *   - kp:   geomagnetic activity index (0–9)        → wind speed, aurora extent
+ *   - bzNt: IMF Bz, GSM (nT, negative = southward)  → storminess / colour
+ *   - btNt: total IMF magnitude (nT)                → density / brightness
  *
- * The feed doesn't carry plasma speed/density, so we use the magnetic-field and
- * geomagnetic-index products that are present:
- *   - kp:   geomagnetic activity index (0–9)               → flow speed / intensity
- *   - bzNt: IMF Bz, GSM (nT, negative = southward)         → storminess / colour
- *   - btNt: total IMF magnitude (nT)                       → density / brightness
+ * All three are time-resolved so conditions can be read at any instant — past,
+ * present, or future (forecast / demo) — as the timeline is scrubbed.
  */
 export interface SolarConditions {
   kp: number
@@ -25,7 +25,14 @@ export const DEFAULT_CONDITIONS: SolarConditions = {
   observedAt: null,
 }
 
-const PRODUCTS = ['kp_history', 'solar_wind_mag_bz_gsm', 'solar_wind_mag_bt']
+/** A driver's value over time: { t: ms epoch, v: value }, sorted ascending. */
+type Series = { t: number; v: number }[]
+
+export interface SolarDataset {
+  kpSeries: Series
+  bzSeries: Series
+  btSeries: Series
+}
 
 interface ForecastRow {
   product_type: string
@@ -33,135 +40,145 @@ interface ForecastRow {
   valid_start: string | null
 }
 
-/**
- * Fetch the latest observed value of each driver. Returns null if Supabase isn't
- * configured or the query fails (callers fall back to DEFAULT_CONDITIONS).
- */
-export async function fetchSolarConditions(): Promise<SolarConditions | null> {
-  if (!supabase) return null
-  const { data, error } = await supabase
-    .from('swpc_forecast_records')
-    .select('product_type,value,valid_start')
-    .in('product_type', PRODUCTS)
-    .order('valid_start', { ascending: false })
-    .limit(150)
-  if (error || !data) return null
-  const rows = data as ForecastRow[]
-  // Rows are newest-first, so the first match per product is the latest value.
-  const latest = (p: string) =>
-    rows.find((r) => r.product_type === p && r.value != null)
-  const kp = latest('kp_history')
-  const bz = latest('solar_wind_mag_bz_gsm')
-  const bt = latest('solar_wind_mag_bt')
-  return {
-    kp: kp?.value ?? DEFAULT_CONDITIONS.kp,
-    bzNt: bz?.value ?? DEFAULT_CONDITIONS.bzNt,
-    btNt: bt?.value ?? DEFAULT_CONDITIONS.btNt,
-    observedAt: kp?.valid_start ?? bz?.valid_start ?? bt?.valid_start ?? null,
-  }
-}
-
-/**
- * A time-resolved view of the solar drivers, so conditions can be read at any
- * instant — including the future (via the Kp forecast) when scrubbing the
- * timeline. Bz/Bt have no forecast in the feed, so we carry their latest
- * observed values and hold them constant across time.
- */
-export interface SolarDataset {
-  /** Kp over time (observed history + forecast), sorted ascending by `t` (ms). */
-  kpSeries: { t: number; kp: number }[]
-  bzNt: number
-  btNt: number
-}
-
-/** Fetch the Kp history+forecast series and the latest Bz/Bt. */
-export async function fetchSolarDataset(): Promise<SolarDataset | null> {
-  if (!supabase) return null
-  const [kpRes, magRes] = await Promise.all([
-    supabase
-      .from('swpc_forecast_records')
-      .select('value,valid_start')
-      .in('product_type', ['kp_history', 'kp_forecast'])
-      .order('valid_start', { ascending: true })
-      .limit(800),
-    supabase
-      .from('swpc_forecast_records')
-      .select('product_type,value,valid_start')
-      .in('product_type', ['solar_wind_mag_bz_gsm', 'solar_wind_mag_bt'])
-      .order('valid_start', { ascending: false })
-      .limit(20),
-  ])
-  if (kpRes.error || magRes.error) return null
-
-  // Build the Kp series (dedupe to one value per timestamp, last wins).
+/** Build a sorted, de-duplicated series from rows of a single product. */
+function buildSeries(rows: ForecastRow[], product: string): Series {
   const byTime = new Map<number, number>()
-  for (const r of (kpRes.data ?? []) as ForecastRow[]) {
-    if (r.value == null || !r.valid_start) continue
+  for (const r of rows) {
+    if (r.product_type !== product || r.value == null || !r.valid_start) continue
     byTime.set(new Date(r.valid_start).getTime(), r.value)
   }
-  const kpSeries = [...byTime.entries()]
-    .map(([t, kp]) => ({ t, kp }))
+  return [...byTime.entries()]
+    .map(([t, v]) => ({ t, v }))
     .sort((a, b) => a.t - b.t)
-
-  const mag = (magRes.data ?? []) as ForecastRow[]
-  const latestMag = (p: string) =>
-    mag.find((r) => r.product_type === p && r.value != null)?.value
-
-  return {
-    kpSeries,
-    bzNt: latestMag('solar_wind_mag_bz_gsm') ?? DEFAULT_CONDITIONS.bzNt,
-    btNt: latestMag('solar_wind_mag_bt') ?? DEFAULT_CONDITIONS.btNt,
-  }
 }
 
-let cachedDataset: { ds: SolarDataset; at: number } | null = null
-let inflight: Promise<SolarDataset | null> | null = null
-
-/**
- * Cached accessor for the solar dataset, shared across layers (solar wind +
- * geomagnetic) so they don't each issue the same query. Re-fetches when the
- * cache is older than `maxAgeMs`.
- */
-export async function getSolarDataset(
-  maxAgeMs = 5 * 60 * 1000,
-): Promise<SolarDataset | null> {
-  if (cachedDataset && Date.now() - cachedDataset.at < maxAgeMs) {
-    return cachedDataset.ds
+/** Linearly interpolate a series at time `t`, clamping at the ends. */
+function interp(s: Series, t: number, fallback: number): number {
+  if (s.length === 0) return fallback
+  if (s.length === 1 || t <= s[0].t) return s[0].v
+  if (t >= s[s.length - 1].t) return s[s.length - 1].v
+  let lo = 0
+  let hi = s.length - 1
+  while (hi - lo > 1) {
+    const mid = (lo + hi) >> 1
+    if (s[mid].t <= t) lo = mid
+    else hi = mid
   }
-  if (inflight) return inflight
-  inflight = (async () => {
-    const ds = await fetchSolarDataset()
-    if (ds) cachedDataset = { ds, at: Date.now() }
-    inflight = null
-    return ds
-  })()
-  return inflight
+  const a = s[lo]
+  const b = s[hi]
+  const f = b.t === a.t ? 0 : (t - a.t) / (b.t - a.t)
+  return a.v + (b.v - a.v) * f
 }
 
-/** Conditions at a given instant: Kp interpolated from the series, Bz/Bt held. */
+/** Conditions at a given instant, interpolated from each driver's series. */
 export function conditionsAt(ds: SolarDataset, date: Date): SolarConditions {
   const t = date.getTime()
-  const s = ds.kpSeries
-  let kp = DEFAULT_CONDITIONS.kp
-  if (s.length === 1) {
-    kp = s[0].kp
-  } else if (s.length > 1) {
-    if (t <= s[0].t) kp = s[0].kp
-    else if (t >= s[s.length - 1].t) kp = s[s.length - 1].kp
-    else {
-      // Binary search for the bracketing interval, then linearly interpolate.
-      let lo = 0
-      let hi = s.length - 1
-      while (hi - lo > 1) {
-        const mid = (lo + hi) >> 1
-        if (s[mid].t <= t) lo = mid
-        else hi = mid
-      }
-      const a = s[lo]
-      const b = s[hi]
-      const f = b.t === a.t ? 0 : (t - a.t) / (b.t - a.t)
-      kp = a.kp + (b.kp - a.kp) * f
-    }
+  return {
+    kp: interp(ds.kpSeries, t, DEFAULT_CONDITIONS.kp),
+    bzNt: interp(ds.bzSeries, t, DEFAULT_CONDITIONS.bzNt),
+    btNt: interp(ds.btSeries, t, DEFAULT_CONDITIONS.btNt),
+    observedAt: null,
   }
-  return { kp, bzNt: ds.bzNt, btNt: ds.btNt, observedAt: null }
+}
+
+/** Pull all three driver series from one of the forecast tables. */
+async function fetchFromTable(table: string): Promise<SolarDataset | null> {
+  if (!supabase) return null
+  const { data, error } = await supabase
+    .from(table)
+    .select('product_type,value,valid_start')
+    .in('product_type', [
+      'kp_history',
+      'kp_forecast',
+      'solar_wind_mag_bz_gsm',
+      'solar_wind_mag_bt',
+    ])
+    .order('valid_start', { ascending: true })
+    .limit(2000)
+  if (error || !data) return null
+  const rows = data as ForecastRow[]
+  // kp_history + kp_forecast merge into one Kp series.
+  const kp = buildSeries(rows, 'kp_history').concat(
+    buildSeries(rows, 'kp_forecast'),
+  )
+  kp.sort((a, b) => a.t - b.t)
+  return {
+    kpSeries: kp,
+    bzSeries: buildSeries(rows, 'solar_wind_mag_bz_gsm'),
+    btSeries: buildSeries(rows, 'solar_wind_mag_bt'),
+  }
+}
+
+/** Live data from the real forecast table. */
+function fetchSolarDataset(): Promise<SolarDataset | null> {
+  return fetchFromTable('swpc_forecast_records')
+}
+
+/** Shift a series so its earliest sample lands at `anchor` (ms). */
+function anchorSeries(s: Series, shift: number): Series {
+  return s.map((p) => ({ t: p.t + shift, v: p.v }))
+}
+
+/**
+ * Client-side copy of the demo storm profile (matches the SQL in the
+ * `swpc_forecast_records_demo` migration). Used as a fallback when that table
+ * hasn't been created/populated yet, so the demo still works. Anchored to now.
+ */
+function generateDemoSeries(): SolarDataset {
+  const now = Date.now()
+  const HOUR = 3600 * 1000
+  const kpSeries: Series = []
+  const bzSeries: Series = []
+  const btSeries: Series = []
+  for (let h = 0; h <= 48; h++) {
+    const t = now + h * HOUR
+    const ramp = Math.max(0, h - 24) / 24 // 0 first day, → 1 over the second
+    kpSeries.push({ t, v: Math.min(9, 2 + 7 * ramp) })
+    bzSeries.push({ t, v: 3 - 31 * ramp })
+    btSeries.push({ t, v: 5 + 30 * ramp })
+  }
+  return { kpSeries, bzSeries, btSeries }
+}
+
+/** Demo data from the demo table, re-anchored to start "now"; falls back to the
+ * generated profile if the table is missing/empty. */
+async function fetchDemoDataset(): Promise<SolarDataset> {
+  const ds = await fetchFromTable('swpc_forecast_records_demo')
+  const all = ds ? [...ds.kpSeries, ...ds.bzSeries, ...ds.btSeries] : []
+  if (!ds || all.length === 0) return generateDemoSeries()
+  const minT = Math.min(...all.map((p) => p.t))
+  const shift = Date.now() - minT
+  return {
+    kpSeries: anchorSeries(ds.kpSeries, shift),
+    bzSeries: anchorSeries(ds.bzSeries, shift),
+    btSeries: anchorSeries(ds.btSeries, shift),
+  }
+}
+
+const cache: Record<'real' | 'demo', { ds: SolarDataset; at: number } | null> =
+  { real: null, demo: null }
+const inflight: Record<'real' | 'demo', Promise<SolarDataset | null> | null> = {
+  real: null,
+  demo: null,
+}
+
+/**
+ * Cached accessor shared across layers. `demo` selects the synthetic escalating
+ * storm dataset (from the demo table) instead of the live feed.
+ */
+export async function getSolarDataset(
+  demo = false,
+  maxAgeMs = 5 * 60 * 1000,
+): Promise<SolarDataset | null> {
+  const key = demo ? 'demo' : 'real'
+  const c = cache[key]
+  if (c && Date.now() - c.at < maxAgeMs) return c.ds
+  if (inflight[key]) return inflight[key]
+  inflight[key] = (async () => {
+    const ds = demo ? await fetchDemoDataset() : await fetchSolarDataset()
+    if (ds) cache[key] = { ds, at: Date.now() }
+    inflight[key] = null
+    return ds
+  })()
+  return inflight[key]
 }

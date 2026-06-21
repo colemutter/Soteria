@@ -21,7 +21,11 @@ const REAL_REFRESH_MS = 10 * 60 * 1000 // ~10 minutes
 function App() {
   // Which top-level view is active. 'map' is the default globe view.
   const [view, setView] = useState<AppView>('map')
+  // Map selection (drives the globe camera + detail panel).
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  // Satellites-screen selection — independent of the map, so picking a
+  // satellite there only shows its model/details and doesn't move the globe.
+  const [satSelectedId, setSatSelectedId] = useState<string | null>(null)
   // When false, the Earth shader's day/night + ocean effects are bypassed and a
   // plain, fully-lit textured globe is shown.
   const [shadingOn, setShadingOn] = useState(true)
@@ -29,6 +33,8 @@ function App() {
   const [solarWindOn, setSolarWindOn] = useState(true)
   // Toggles the geomagnetic (auroral oval) layer.
   const [geomagOn, setGeomagOn] = useState(true)
+  // Demo mode: feeds the layers a synthetic escalating-storm dataset.
+  const [demoOn, setDemoOn] = useState(false)
   // The live satellite list: seeded with the built-ins, grown by the UI.
   const [satellites, setSatellites] = useState<SatelliteEntry[]>(SATELLITES)
 
@@ -43,7 +49,7 @@ function App() {
   /**
    * Add a theoretical satellite from a name + TLE. Returns the created entry so
    * the add form can surface a parse error; on success it's appended and
-   * selected so the camera flies to it.
+   * selected in the Satellites screen (where the add happens — not the map).
    */
   const addTheoretical = (
     name: string,
@@ -53,7 +59,7 @@ function App() {
     const entry = createUserSatellite(name, line1, line2)
     if (!entry.error) {
       setSatellites((prev) => [...prev, entry])
-      setSelectedId(entry.id)
+      setSatSelectedId(entry.id)
       void syncSatellites([entry], simClock.date) // immediate DB write on add
     }
     return entry
@@ -67,13 +73,13 @@ function App() {
     const entry = createRealSatellite(record)
     const existing = satellitesRef.current.find((s) => s.id === entry.id)
     if (existing) {
-      setSelectedId(existing.id)
+      setSatSelectedId(existing.id)
       void syncSatellites([existing], simClock.date) // refresh its row
       return existing
     }
     if (!entry.error) {
       setSatellites((prev) => [...prev, entry])
-      setSelectedId(entry.id)
+      setSatSelectedId(entry.id)
       void syncSatellites([entry], simClock.date) // immediate DB write on add
     }
     return entry
@@ -127,6 +133,7 @@ function App() {
         shadingOn={shadingOn}
         solarWindOn={solarWindOn}
         geomagOn={geomagOn}
+        demoOn={demoOn}
       />
 
       {view === 'map' && (
@@ -140,14 +147,16 @@ function App() {
           onToggleSolarWind={() => setSolarWindOn((v) => !v)}
           geomagOn={geomagOn}
           onToggleGeomag={() => setGeomagOn((v) => !v)}
+          demoOn={demoOn}
+          onToggleDemo={() => setDemoOn((v) => !v)}
         />
       )}
 
       {view === 'satellites' && (
         <SatellitesView
           satellites={satellites}
-          selectedId={selectedId}
-          onSelect={setSelectedId}
+          selectedId={satSelectedId}
+          onSelect={setSatSelectedId}
           onAddTheoretical={addTheoretical}
           onAddReal={addReal}
         />

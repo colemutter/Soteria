@@ -425,6 +425,28 @@
 .ui-toggle:hover {
   background: rgba(120, 160, 230, 0.1);
 }
+
+/* Standalone demo-mode toggle (bottom-left), with an amber accent so it's
+   obvious the displayed data is a synthetic scenario, not live. */
+.demo-toggle {
+  bottom: 22px;
+  left: 20px;
+  width: auto;
+  padding: 9px 14px;
+  background: rgba(12, 16, 28, 0.72);
+}
+.demo-toggle:hover {
+  background: rgba(255, 179, 71, 0.12);
+}
+.demo-toggle.on {
+  border-color: rgba(255, 179, 71, 0.5);
+}
+.demo-toggle.on .toggle-track {
+  background: #ffb347;
+}
+.demo-toggle.on .toggle-state {
+  color: #ffb347;
+}
 .toggle-track {
   position: relative;
   width: 34px;
@@ -640,7 +662,7 @@
   top: 16px;
   left: 50%;
   transform: translateX(-50%);
-  z-index: 20;
+  z-index: 40;
 }
 .nav-tabs {
   display: flex;
@@ -678,7 +700,9 @@
 .sats-view {
   position: absolute;
   inset: 0;
-  z-index: 5;
+  /* Above the in-scene satellite name label (drei <Html>, z-index up to 10) so
+     that label can't float over this panel; the navbar sits above this. */
+  z-index: 30;
   background: radial-gradient(120% 90% at 70% 10%, #0a1020 0%, #05070f 70%);
   display: flex;
   gap: 20px;

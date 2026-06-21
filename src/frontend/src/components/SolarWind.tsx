@@ -77,7 +77,7 @@ const fragmentShader = /* glsl */ `
 
 const clamp01 = (x: number) => Math.min(1, Math.max(0, x))
 
-export function SolarWind() {
+export function SolarWind({ demo = false }: { demo?: boolean }) {
   const pointsRef = useRef<Points>(null)
   const matRef = useRef<ShaderMaterial>(null)
 
@@ -128,7 +128,7 @@ export function SolarWind() {
   useEffect(() => {
     let active = true
     const load = async () => {
-      const ds = await getSolarDataset()
+      const ds = await getSolarDataset(demo)
       if (active && ds) dataRef.current = ds
     }
     void load()
@@ -137,7 +137,7 @@ export function SolarWind() {
       active = false
       clearInterval(id)
     }
-  }, [])
+  }, [demo])
 
   // Apply conditions (for the current simulated time) to speed + material.
   const speedRef = useRef(4)

@@ -17,7 +17,7 @@ interface Props {
 
 const KIND_LABEL: Record<string, string> = {
   real: 'Real · live elements',
-  theoretical: 'Theoretical',
+  theoretical: 'Custom',
   builtin: 'Built-in',
 }
 

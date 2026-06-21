@@ -51,6 +51,8 @@ export interface SatelliteAlert {
   possibleOutcomes: string[]
   commands: AlertCommand[]
   createdAt: string | null
+  /** Space-weather event window this alert belongs to (for "danger passed"). */
+  eventWindowId: string | null
 }
 
 const LEVEL_RANK: Record<DangerLevel, number> = { safe: 0, caution: 1, critical: 2 }
@@ -140,6 +142,7 @@ type RunbookRow = {
   risk_level: string | null
   metadata: Record<string, unknown> | null
   created_at: string | null
+  event_window_id: string | null
 }
 
 type ReportRow = {
@@ -205,6 +208,7 @@ function runbookToAlert(row: RunbookRow): SatelliteAlert | null {
     possibleOutcomes: outcomes,
     commands: asArray(row.commands).map(commandToItem),
     createdAt: row.created_at,
+    eventWindowId: row.event_window_id,
   }
 }
 
@@ -213,6 +217,7 @@ function reportToAlerts(row: ReportRow): SatelliteAlert[] {
   const findings = asArray(rj.findings)
   const eventSeverity = humanize(rj.event_severity as string)
   const summary = (rj.summary as string) || ''
+  const eventWindowId = (rj.event_window_id as string) || null
 
   const out: SatelliteAlert[] = []
   findings.forEach((f, i) => {
@@ -234,9 +239,36 @@ function reportToAlerts(row: ReportRow): SatelliteAlert[] {
       ),
       commands: [],
       createdAt: row.created_at,
+      eventWindowId,
     })
   })
   return out
+}
+
+/**
+ * Fetch the end times of the given event windows, keyed by id. Used to drop
+ * alerts whose danger has already passed. The stored `status` column can lag, so
+ * we compare `window_end` to "now" directly. Returns an empty map on error so
+ * filtering fails open (alerts are kept rather than wrongly hidden).
+ */
+async function fetchEventWindowEnds(
+  ids: string[],
+): Promise<Map<string, number>> {
+  const ends = new Map<string, number>()
+  if (!supabase || ids.length === 0) return ends
+  const { data, error } = await supabase
+    .from('space_weather_event_windows')
+    .select('id,window_end')
+    .in('id', ids)
+  if (error) {
+    console.error('[alerts] event-window query failed', error)
+    return ends
+  }
+  for (const row of (data ?? []) as { id: string; window_end: string }[]) {
+    const t = Date.parse(row.window_end)
+    if (!Number.isNaN(t)) ends.set(row.id, t)
+  }
+  return ends
 }
 
 // How many recent rows to pull. Runbooks are per-satellite/per-event so we want
@@ -260,7 +292,7 @@ export async function fetchSatelliteAlerts(): Promise<SatelliteAlert[]> {
     supabase
       .from('command_runbooks')
       .select(
-        'id,satellite_external_id,title,summary,commands,risk_level,metadata,created_at',
+        'id,satellite_external_id,title,summary,commands,risk_level,metadata,created_at,event_window_id',
       )
       .order('created_at', { ascending: false })
       .limit(RUNBOOK_LIMIT),
@@ -281,24 +313,49 @@ export async function fetchSatelliteAlerts(): Promise<SatelliteAlert[]> {
     )
   }
 
+  // Build all candidate alerts (newest-first), keeping runbook precedence.
+  const runbookAlerts = ((runbookRes.data ?? []) as RunbookRow[])
+    .map(runbookToAlert)
+    .filter((a): a is SatelliteAlert => a !== null)
+  const reportAlerts = ((reportRes.data ?? []) as ReportRow[]).flatMap(
+    reportToAlerts,
+  )
+
+  // Drop alerts whose event window has already ended ("danger has passed").
+  // Filter BEFORE de-duping so a satellite whose newest alert has passed can
+  // still surface an older alert that's still active.
+  const windowIds = uniq(
+    [...runbookAlerts, ...reportAlerts]
+      .map((a) => a.eventWindowId)
+      .filter((id): id is string => !!id),
+  )
+  const ends = await fetchEventWindowEnds(windowIds)
+  const now = Date.now()
+  const isActive = (a: SatelliteAlert) => {
+    if (!a.eventWindowId) return true // unknown timing — keep it
+    const end = ends.get(a.eventWindowId)
+    return end === undefined || end >= now // keep if window unknown or not ended
+  }
+
   const alerts: SatelliteAlert[] = []
   const covered = new Set<string>()
 
-  for (const row of (runbookRes.data ?? []) as RunbookRow[]) {
-    const alert = runbookToAlert(row)
-    if (!alert) continue
+  for (const alert of runbookAlerts) {
+    if (!isActive(alert)) continue
+    // Newest-first, so the first active alert seen for a satellite is its most
+    // recent; skip any older ones so each satellite shows just one.
+    if (covered.has(alert.satelliteId)) continue
     alerts.push(alert)
     covered.add(alert.satelliteId)
   }
 
-  for (const row of (reportRes.data ?? []) as ReportRow[]) {
-    for (const alert of reportToAlerts(row)) {
-      // Skip satellites already described by a runbook (or an earlier report) so
-      // each satellite shows a single, most-actionable alert.
-      if (covered.has(alert.satelliteId)) continue
-      alerts.push(alert)
-      covered.add(alert.satelliteId)
-    }
+  for (const alert of reportAlerts) {
+    if (!isActive(alert)) continue
+    // Skip satellites already described by a runbook (or an earlier report) so
+    // each satellite shows a single, most-actionable alert.
+    if (covered.has(alert.satelliteId)) continue
+    alerts.push(alert)
+    covered.add(alert.satelliteId)
   }
 
   return alerts

@@ -1,5 +1,5 @@
 import { geodeticAt, type SatRec } from './orbital'
-import { supabase, warnNoSupabaseOnce } from './supabase'
+import { apiRequest } from './apiClient'
 import type { SatelliteEntry } from '../data/satellites'
 
 /**
@@ -84,6 +84,12 @@ export interface SatelliteRow {
   updated_at: string
 }
 
+interface SatelliteUpsertResponse {
+  status: string
+  count: number
+  satellites: SatelliteRow[]
+}
+
 /** Build the DB row for one satellite at the given (position) time. */
 export function toSatelliteRow(entry: SatelliteEntry, date: Date): SatelliteRow {
   const geo = geodeticAt(entry.satrec, date)
@@ -116,23 +122,25 @@ export function toSatelliteRow(entry: SatelliteEntry, date: Date): SatelliteRow 
 }
 
 /**
- * Upsert the given satellites into Supabase (positions sampled at `date`).
- * No-ops gracefully when Supabase isn't configured. Errored entries are skipped.
+ * Upsert the given satellites through the backend API (positions sampled at `date`).
+ * No-ops gracefully when the backend API URL isn't configured. Errored entries are skipped.
  */
 export async function syncSatellites(
   entries: SatelliteEntry[],
   date: Date,
 ): Promise<void> {
-  if (!supabase) {
-    warnNoSupabaseOnce()
-    return
-  }
   const rows = entries.filter((e) => !e.error).map((e) => toSatelliteRow(e, date))
   if (rows.length === 0) return
-  const { error } = await supabase
-    .from('satellites')
-    .upsert(rows, { onConflict: 'external_id' })
-  if (error) {
-    console.error('[supabase] satellite sync failed:', error.message)
+  try {
+    await apiRequest<SatelliteUpsertResponse>('/api/satellites', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ satellites: rows }),
+    })
+  } catch (error) {
+    console.error(
+      '[api] satellite sync failed:',
+      error instanceof Error ? error.message : error,
+    )
   }
 }

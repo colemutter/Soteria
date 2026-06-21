@@ -13,7 +13,7 @@ import {
 } from './data/satellites'
 import { fetchTleById, type TleRecord } from './lib/tleApi'
 import { syncSatellites } from './lib/satelliteSync'
-import { rememberSatellite, fetchSavedSatellites } from './lib/savedSatellites'
+import { rememberSatellite, fetchAllDbSatellites } from './lib/savedSatellites'
 import { simClock } from './lib/simClock'
 import './App.css'
 
@@ -90,10 +90,10 @@ function App() {
     return entry
   }
 
-  // Restore satellites added in a previous visit (cached ids → DB rows).
+  // Restore satellites already persisted in the DB.
   useEffect(() => {
     let active = true
-    void fetchSavedSatellites().then((saved) => {
+    void fetchAllDbSatellites().then((saved) => {
       if (!active || saved.length === 0) return
       setSatellites((prev) => {
         const seen = new Set(prev.map((s) => s.id))

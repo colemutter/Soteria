@@ -1,14 +1,14 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 
 /**
- * Shared Supabase client for the frontend.
+ * Shared Supabase client for frontend read-only data features.
  *
  * Configured via Vite env vars (put them in `src/frontend/.env`):
  *   VITE_SUPABASE_URL=...
  *   VITE_SUPABASE_ANON_KEY=...
  *
- * If either is missing the client is `null` and DB writes become no-ops (with a
- * one-time console warning) so the app still runs without credentials.
+ * If either is missing the client is `null` and Supabase-backed frontend data
+ * features become no-ops so the app still runs without credentials.
  */
 const url = import.meta.env.VITE_SUPABASE_URL as string | undefined
 const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined
@@ -22,6 +22,6 @@ export function warnNoSupabaseOnce() {
   warned = true
   console.warn(
     '[supabase] VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY not set — ' +
-      'satellite DB sync is disabled.',
+      'Supabase-backed frontend data is disabled.',
   )
 }

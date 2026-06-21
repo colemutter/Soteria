@@ -1,4 +1,4 @@
-import { supabase } from './supabase'
+import { apiRequest } from './apiClient'
 import {
   defineSatellite,
   DEFAULT_SATELLITE_MODEL,
@@ -8,8 +8,8 @@ import {
 /**
  * Browser-side memory of the satellites a user has added. We cache just their
  * external ids (the `satellites` table key, e.g. `real-25544` / `theo-<uuid>`)
- * in localStorage; on the next visit we re-fetch their current rows from the DB
- * and rebuild them, so added satellites persist across reloads in this browser.
+ * in localStorage so the local UI can remember user intent across reloads.
+ * Satellite DB reads now go through the backend API instead of Supabase directly.
  */
 
 const STORAGE_KEY = 'soteria.addedSatellites'
@@ -56,6 +56,10 @@ interface SatelliteRowLite {
   tle_epoch: string | null
 }
 
+interface SatelliteListResponse {
+  satellites: SatelliteRowLite[]
+}
+
 /** Rebuild a satellite entry from its stored DB row. */
 function rowToEntry(row: SatelliteRowLite): SatelliteEntry {
   const id = row.external_id
@@ -78,20 +82,32 @@ function rowToEntry(row: SatelliteRowLite): SatelliteEntry {
 }
 
 /**
- * Load previously-added satellites: read their ids from the browser cache, then
- * fetch their current rows from the `satellites` table and rebuild entries.
- * Returns [] if nothing is cached, Supabase isn't configured, or the query fails.
+ * Load persisted satellites through the backend API and rebuild entries.
+ * Returns [] if the backend API isn't configured or the query fails.
  */
+export async function fetchStoredSatellites(): Promise<SatelliteEntry[]> {
+  try {
+    const response = await apiRequest<SatelliteListResponse>('/api/satellites?limit=200')
+    if (!response) return []
+    return response.satellites
+      .map(rowToEntry)
+      .filter((e) => !e.error && e.tle.line1 && e.tle.line2)
+  } catch (error) {
+    console.error(
+      '[api] satellite load failed:',
+      error instanceof Error ? error.message : error,
+    )
+    return []
+  }
+}
+
 export async function fetchSavedSatellites(): Promise<SatelliteEntry[]> {
-  if (!supabase) return []
-  const ids = getRememberedIds()
-  if (ids.length === 0) return []
-  const { data, error } = await supabase
-    .from('satellites')
-    .select('external_id,norad_cat_id,name,tle_line1,tle_line2,tle_epoch')
-    .in('external_id', ids)
-  if (error || !data) return []
-  return (data as SatelliteRowLite[])
-    .map(rowToEntry)
-    .filter((e) => !e.error && e.tle.line1 && e.tle.line2)
+  const rememberedIds = new Set(getRememberedIds())
+  if (rememberedIds.size === 0) return []
+  const stored = await fetchStoredSatellites()
+  return stored.filter((entry) => rememberedIds.has(entry.id))
+}
+
+export async function fetchAllDbSatellites(): Promise<SatelliteEntry[]> {
+  return fetchStoredSatellites()
 }

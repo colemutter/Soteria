@@ -395,6 +395,87 @@
   font-style: italic;
 }
 
+/* clickable alert rows in the Alerts pane */
+.alert-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+.alert-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-left-width: 3px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  color: #cdd5e6;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.alert-item:hover {
+  background: rgba(120, 160, 230, 0.12);
+}
+.alert-item.active {
+  background: rgba(120, 160, 230, 0.18);
+}
+.alert-item.lvl-critical {
+  border-left-color: #ff5a5a;
+}
+.alert-item.lvl-caution {
+  border-left-color: #ffc24f;
+}
+.alert-item.lvl-safe {
+  border-left-color: #46e08a;
+}
+.alert-item .status-icon {
+  flex: none;
+}
+.alert-item-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.alert-item-name {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #e8ecf5;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.alert-item-title {
+  font-size: 10.5px;
+  color: #8b96b2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.alert-item-risk {
+  flex: none;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+.alert-item-risk.lvl-critical {
+  color: #ff9b9b;
+}
+.alert-item-risk.lvl-caution {
+  color: #ffdb8e;
+}
+.alert-item-risk.lvl-safe {
+  color: #7fe3a8;
+}
+
 /* ---- layer toggles, grouped in one pane (bottom-right) ---- */
 .toggle-pane {
   bottom: 22px;
@@ -605,6 +686,8 @@
   right: 20px;
   width: 300px;
   padding: 18px;
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
 }
 .panel-right .close {
   position: absolute;
@@ -641,6 +724,179 @@
   text-align: right;
   font-variant-numeric: tabular-nums;
   color: #e8ecf5;
+}
+
+/* ---- alert detail (in the right-hand satellite panel) ---- */
+.sat-alerts {
+  margin-top: 16px;
+  border-top: 1px solid rgba(120, 160, 230, 0.18);
+  padding-top: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.sat-alerts-title {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: #aab4cc;
+}
+.sat-alert {
+  border: 1px solid rgba(120, 160, 230, 0.16);
+  border-left-width: 3px;
+  border-radius: 8px;
+  padding: 10px 11px;
+  background: rgba(255, 255, 255, 0.03);
+}
+.sat-alert.lvl-critical {
+  border-left-color: #ff5a5a;
+}
+.sat-alert.lvl-caution {
+  border-left-color: #ffc24f;
+}
+.sat-alert.lvl-safe {
+  border-left-color: #46e08a;
+}
+.sat-alert-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.sat-alert-head .status-icon {
+  flex: none;
+}
+.sat-alert-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #e8ecf5;
+}
+.sat-alert-risk {
+  flex: none;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+.sat-alert-risk.lvl-critical {
+  color: #ff9b9b;
+}
+.sat-alert-risk.lvl-caution {
+  color: #ffdb8e;
+}
+.sat-alert-risk.lvl-safe {
+  color: #7fe3a8;
+}
+.sat-alert-desc {
+  margin: 8px 0 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: #aab4cc;
+  white-space: pre-wrap;
+}
+.sat-alert-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 9px;
+}
+.sat-alert-tag {
+  font-size: 10px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(120, 160, 230, 0.12);
+  border: 1px solid rgba(120, 160, 230, 0.25);
+  color: #c2cce4;
+}
+.sat-alert-cmds {
+  margin-top: 11px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.sat-alert-cmds-title {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: #8b96b2;
+}
+.sat-cmd {
+  border: 1px solid rgba(120, 160, 230, 0.16);
+  border-radius: 6px;
+  background: rgba(8, 11, 20, 0.5);
+  overflow: hidden;
+}
+.sat-cmd > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 9px;
+  cursor: pointer;
+  font-size: 11.5px;
+  list-style: none;
+}
+.sat-cmd > summary::-webkit-details-marker {
+  display: none;
+}
+.sat-cmd > summary::before {
+  content: '▸';
+  color: #7e8aa6;
+  font-size: 10px;
+}
+.sat-cmd[open] > summary::before {
+  content: '▾';
+}
+.sat-cmd-label {
+  flex: 1;
+  min-width: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: #d7ddec;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sat-cmd-flag {
+  flex: none;
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: #ffdb8e;
+  background: rgba(255, 194, 79, 0.14);
+  border: 1px solid rgba(255, 194, 79, 0.3);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+.sat-cmd-meta {
+  display: flex;
+  gap: 8px;
+  padding: 0 9px 6px;
+  font-size: 11px;
+  color: #aab4cc;
+}
+.sat-cmd-meta span {
+  flex: none;
+  color: #7e8aa6;
+}
+.sat-cmd-meta code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: #d7ddec;
+  word-break: break-all;
+}
+.sat-cmd-script {
+  margin: 0;
+  padding: 9px;
+  border-top: 1px solid rgba(120, 160, 230, 0.12);
+  background: rgba(4, 6, 12, 0.6);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10.5px;
+  line-height: 1.5;
+  color: #b9c2da;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 /* ---- in-scene label ---- */
@@ -791,6 +1047,108 @@
   justify-content: center;
   color: #6b7691;
   font-style: italic;
+}
+
+/* "View alerts" button in the Satellites detail card */
+.view-alerts-btn {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  margin-top: 16px;
+  padding: 11px 13px;
+  border: 1px solid rgba(255, 90, 90, 0.32);
+  border-left-width: 3px;
+  border-radius: 9px;
+  background: rgba(255, 90, 90, 0.08);
+  color: #f0d3d3;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.view-alerts-btn:hover {
+  background: rgba(255, 90, 90, 0.16);
+}
+.view-alerts-btn.lvl-caution {
+  border-color: rgba(255, 194, 79, 0.32);
+  background: rgba(255, 194, 79, 0.08);
+  color: #f0e4cb;
+}
+.view-alerts-btn.lvl-caution:hover {
+  background: rgba(255, 194, 79, 0.16);
+}
+.view-alerts-btn.lvl-safe {
+  border-color: rgba(70, 224, 138, 0.3);
+  background: rgba(70, 224, 138, 0.08);
+  color: #cfeede;
+}
+.view-alerts-arrow {
+  margin-left: auto;
+  font-size: 15px;
+  opacity: 0.7;
+}
+
+/* Full-screen single-satellite alert view — an overlay reachable from the map
+   HUD and the Satellites screen, so it sits above the navbar (z-index 40). */
+.alert-view {
+  z-index: 50;
+  justify-content: center;
+  overflow-y: auto;
+}
+.alert-view-panel {
+  position: relative; /* override .panel's absolute */
+  width: 100%;
+  max-width: 720px;
+  margin: 0 auto;
+  align-self: flex-start;
+  padding: 22px 24px 26px;
+}
+.alert-view-head {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 8px 14px;
+  margin-bottom: 18px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid rgba(120, 160, 230, 0.18);
+}
+.back-btn {
+  grid-row: 1 / span 2;
+  align-self: start;
+  padding: 8px 13px;
+  border: 1px solid rgba(120, 160, 230, 0.3);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  color: #cdd5e6;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.back-btn:hover {
+  border-color: rgba(120, 160, 230, 0.6);
+  background: rgba(120, 160, 230, 0.14);
+  color: #fff;
+}
+.alert-view-head h2 {
+  margin: 0;
+  font-size: 20px;
+  align-self: end;
+}
+.alert-view-sub {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  color: #7e8aa6;
+  align-self: start;
+}
+.alert-view-panel .sat-alerts {
+  margin-top: 0;
+  border-top: none;
+  padding-top: 0;
 }
 
 /* ---- space-weather view ---- */

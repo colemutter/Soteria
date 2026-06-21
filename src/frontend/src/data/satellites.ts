@@ -20,6 +20,14 @@ import { parseTle, type SatRec } from '../lib/orbital'
  */
 export type DangerLevel = 'safe' | 'caution' | 'critical'
 
+/**
+ * How a satellite's orbital data is sourced:
+ *  - `builtin`     — bundled sample TLE (static).
+ *  - `theoretical` — user-entered TLE (static, what-if trajectory).
+ *  - `real`        — looked up from the live TLE API and refreshed periodically.
+ */
+export type SatelliteKind = 'builtin' | 'theoretical' | 'real'
+
 export interface SatelliteConfig {
   id: string
   /** Display name, e.g. "ISS (ZARYA)". */
@@ -32,6 +40,12 @@ export interface SatelliteConfig {
   color?: string
   /** Current threat status. Defaults to `safe` when omitted (placeholder). */
   danger?: DangerLevel
+  /** Data source. Defaults to `builtin` when omitted. */
+  kind?: SatelliteKind
+  /** NORAD catalog number — present for `real` satellites; used to refresh. */
+  noradId?: number
+  /** Element-set epoch of the last fetch (ISO) — present for `real` satellites. */
+  updatedAt?: string
   /** Optional GLB model. If omitted, a glowing dot marker is used. */
   model?: {
     /** Path under /public, e.g. "/models/iss.glb". */
@@ -63,6 +77,79 @@ export function defineSatellite(config: SatelliteConfig): SatelliteEntry {
       error: e instanceof Error ? e.message : String(e),
     }
   }
+}
+
+/** Default GLB model given to user-added satellites. */
+export const DEFAULT_SATELLITE_MODEL = {
+  url: '/models/satellite-generic.glb',
+  size: 0.1,
+}
+
+/**
+ * Build a *theoretical* satellite from a user-supplied name and TLE (the two
+ * element lines), using the default model. Returns an entry with `error` set if
+ * the TLE can't be parsed (the caller should surface that to the user). The id
+ * is generated so user satellites can't collide with the built-ins or each other.
+ */
+export function createUserSatellite(
+  name: string,
+  line1: string,
+  line2: string,
+): SatelliteEntry {
+  const trimmed = name.trim() || 'Unnamed satellite'
+  return defineSatellite({
+    id: `theo-${crypto.randomUUID()}`,
+    name: trimmed,
+    description: `Theoretical satellite "${trimmed}" (user-entered trajectory).`,
+    danger: 'safe',
+    kind: 'theoretical',
+    model: DEFAULT_SATELLITE_MODEL,
+    tle: { line1, line2 },
+  })
+}
+
+/**
+ * Build a *real* satellite from a live TLE-API record. Keyed by NORAD id so its
+ * elements can be refreshed; uses the default model. The id is derived from the
+ * NORAD number so re-adding the same satellite is detectable.
+ */
+export function createRealSatellite(record: {
+  satelliteId: number
+  name: string
+  line1: string
+  line2: string
+  date: string
+}): SatelliteEntry {
+  return defineSatellite({
+    id: `real-${record.satelliteId}`,
+    name: record.name,
+    description: `Live satellite · NORAD ${record.satelliteId}.`,
+    danger: 'safe',
+    kind: 'real',
+    noradId: record.satelliteId,
+    updatedAt: record.date,
+    model: DEFAULT_SATELLITE_MODEL,
+    tle: { line1: record.line1, line2: record.line2 },
+  })
+}
+
+/**
+ * Return a copy of `entry` with refreshed element lines (re-parsed satrec),
+ * preserving its identity (id, name, colour, kind, …). Used by the periodic
+ * refresh of real satellites. Strips any prior satrec/error before re-parsing.
+ */
+export function updateSatelliteTle(
+  entry: SatelliteEntry,
+  line1: string,
+  line2: string,
+  updatedAt?: string,
+): SatelliteEntry {
+  const { satrec: _satrec, error: _error, ...config } = entry
+  return defineSatellite({
+    ...config,
+    tle: { line1, line2 },
+    updatedAt: updatedAt ?? config.updatedAt,
+  })
 }
 
 /**

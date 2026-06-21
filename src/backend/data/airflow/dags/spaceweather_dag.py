@@ -45,7 +45,7 @@ def swpc_realtime_etl():
             for endpoint in SWPC_ENDPOINTS
         ]
 
-    @task(pool="swpc_http")
+    @task(max_active_tis_per_dag=4)
     def ingest_swpc_endpoint(endpoint: dict[str, object]) -> dict[str, object]:
         writer = SupabaseSwpcWriter()
         return ingest_endpoint(writer, endpoint).to_dict()

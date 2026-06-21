@@ -246,7 +246,7 @@ def swpc_realtime_etl():
         ]
         return [asdict(endpoint) for endpoint in endpoints]
 
-    @task(pool="swpc_http")
+    @task(max_active_tis_per_dag=4)
     def fetch_endpoint(endpoint: dict) -> dict:
         # Implement in include/swpc/fetch.py:
         # - read previous ETag and Last-Modified for this endpoint
@@ -309,7 +309,8 @@ Implement fetches with these rules:
 - Store `status_code`, `etag`, `last_modified`, `content_length`,
   `content_type`, `fetched_at`, `source_timestamp`, and `raw_uri`.
 - Enforce per-endpoint timeouts.
-- Use an Airflow pool such as `swpc_http` to cap concurrent NOAA requests.
+- Use a DAG-local task limit such as `max_active_tis_per_dag=4` to cap
+  concurrent NOAA requests without requiring deployment-specific pool setup.
 - Do not retry forever. After a few failures, mark endpoint health as stale and
   alert.
 
@@ -427,10 +428,6 @@ Example local-only `airflow_settings.yaml`:
 
 ```yaml
 airflow:
-  pools:
-    - pool_name: swpc_http
-      pool_slot: 4
-      pool_description: Limit concurrent requests to NOAA SWPC
   variables:
     - variable_name: swpc_stale_after_minutes
       variable_value: "5"
@@ -477,7 +474,7 @@ def test_xray_r_scale_thresholds():
 2. Put DAG files in `dags/`.
 3. Put reusable parser/fetch/classifier code in `include/swpc/`.
 4. Add Python dependencies to `requirements.txt`.
-5. Add local pools/connections/variables to `airflow_settings.yaml`.
+5. Add local connections/variables to `airflow_settings.yaml`.
 6. Run locally with `astro dev start`.
 7. Run unit tests and DAG import tests.
 8. Deploy with `astro deploy`.

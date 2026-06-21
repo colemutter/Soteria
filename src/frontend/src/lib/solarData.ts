@@ -220,14 +220,22 @@ async function fetchFromTable(
   // Query Kp, the magnetic field, and the wind speed separately, NEWEST-FIRST:
   // the IMF products are high-cadence, so a single ascending+limit query would
   // return the oldest rows and drop both the recent observations and the Kp
-  // forecast.
+  // forecast. Kp filters by the indexed `endpoint` (not `product_type`, which
+  // can't use the index and was timing out) — the planetary-K endpoints carry
+  // exactly kp_history + kp_forecast. The demo table keys on product_type.
+  const isDemo = table.endsWith('_demo')
+  const kpQuery = supabase
+    .from(table)
+    .select('product_type,value,valid_start')
+    .order('valid_start', { ascending: false })
+    .limit(1500)
   const [kpRes, magRows, speedRows] = await Promise.all([
-    supabase
-      .from(table)
-      .select('product_type,value,valid_start')
-      .in('product_type', ['kp_history', 'kp_forecast'])
-      .order('valid_start', { ascending: false })
-      .limit(1500),
+    isDemo
+      ? kpQuery.in('product_type', ['kp_history', 'kp_forecast'])
+      : kpQuery.in('endpoint', [
+          '/products/noaa-planetary-k-index-forecast.json',
+          '/json/planetary_k_index_1m.json',
+        ]),
     fetchMagRows(table, full),
     fetchSpeedRows(table),
   ])

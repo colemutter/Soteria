@@ -29,7 +29,7 @@ const ALERTS_REFRESH_MS = 10 * 60 * 1000 // ~10 minutes
  * alerts are pre-generated, but we stall before showing them to mimic the time
  * a real agent would take. Only applied on entry, not on exit.
  */
-const DEMO_GENERATION_DELAY_MS = 30 * 1000 // ~30 seconds
+const DEMO_GENERATION_DELAY_MS = 17 * 1000 // ~17 seconds
 
 function App() {
   // Which top-level view is active. 'map' is the default globe view.

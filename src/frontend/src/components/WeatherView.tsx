@@ -23,6 +23,9 @@ import {
  */
 
 const HOUR = 3600 * 1000
+// SWPC's mag/plasma feeds are 1-minute cadence, so refresh the chart data (and
+// thus the L1 propagation) once a minute.
+const REFRESH_MS = 60_000
 
 // Chart geometry (drawn in a 1000×240 viewBox, scaled to fit via CSS).
 const CW = 1000
@@ -86,12 +89,17 @@ export function WeatherView({ demo }: { demo: boolean }) {
 
   useEffect(() => {
     let active = true
+    // Force a refetch each poll (TTL < interval) so the propagation re-runs over
+    // freshly-arrived L1 observations rather than 5-minute-stale cached ones.
+    // Light fetch (latest page only): the IMF chart is forward-looking and Kp has
+    // its own query, so the deep paged history isn't needed — and one small query
+    // a minute is far kinder to the DB (and its statement timeouts) than 14 paged.
     const load = async () => {
-      const d = await getSolarDataset(demo, true) // full history for the charts
+      const d = await getSolarDataset(demo, false, REFRESH_MS / 2)
       if (active && d) setDs(d)
     }
     void load()
-    const id = setInterval(() => void load(), 60_000)
+    const id = setInterval(() => void load(), REFRESH_MS)
     return () => {
       active = false
       clearInterval(id)

@@ -144,11 +144,21 @@ export function updateSatelliteTle(
   line2: string,
   updatedAt?: string,
 ): SatelliteEntry {
-  const { satrec: _satrec, error: _error, ...config } = entry
+  const config: SatelliteConfig = {
+    id: entry.id,
+    name: entry.name,
+    description: entry.description,
+    tle: { line1, line2 },
+    color: entry.color,
+    danger: entry.danger,
+    kind: entry.kind,
+    noradId: entry.noradId,
+    updatedAt: updatedAt ?? entry.updatedAt,
+    model: entry.model,
+  }
+
   return defineSatellite({
     ...config,
-    tle: { line1, line2 },
-    updatedAt: updatedAt ?? config.updatedAt,
   })
 }
 

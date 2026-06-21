@@ -6,7 +6,7 @@ import json
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass
 from typing import Any, Protocol
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, build_opener
 
 from include.swpc.endpoints import SWPC_ORIGIN
@@ -203,7 +203,22 @@ def fetch_swpc_endpoint_json(
 
     except HTTPError as exc:
         if exc.code != 304:
-            raise
+            etag = _header_value(exc.headers, "ETag") or _state_value(
+                endpoint_state, "etag"
+            )
+            last_modified = _header_value(
+                exc.headers, "Last-Modified"
+            ) or _state_value(endpoint_state, "last_modified")
+            return _unchanged_result(
+                endpoint=metadata.path,
+                fetched_at=fetched_at,
+                status_code=exc.code,
+                etag=etag,
+                last_modified=last_modified,
+                content_type=_header_value(exc.headers, "Content-Type"),
+                payload_hash=_state_value(endpoint_state, "payload_hash"),
+                error=f"http_error: {exc.code} {exc.reason}",
+            )
         etag = _header_value(exc.headers, "ETag") or _state_value(endpoint_state, "etag")
         last_modified = _header_value(exc.headers, "Last-Modified") or _state_value(
             endpoint_state, "last_modified"
@@ -217,6 +232,17 @@ def fetch_swpc_endpoint_json(
             content_type=_header_value(exc.headers, "Content-Type"),
             payload_hash=_state_value(endpoint_state, "payload_hash"),
             error=None,
+        )
+    except (TimeoutError, URLError) as exc:
+        return _unchanged_result(
+            endpoint=metadata.path,
+            fetched_at=fetched_at,
+            status_code=0,
+            etag=_state_value(endpoint_state, "etag"),
+            last_modified=_state_value(endpoint_state, "last_modified"),
+            content_type=None,
+            payload_hash=_state_value(endpoint_state, "payload_hash"),
+            error=f"fetch_error: {exc}",
         )
 
     payload_hash = payload_sha256(payload)

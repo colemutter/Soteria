@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 
 import pendulum
-from airflow.decorators import dag, task
+from airflow.sdk import dag, task
 from airflow.providers.standard.operators.trigger_dagrun import TriggerDagRunOperator
 
 AIRFLOW_ROOT = Path(__file__).resolve().parents[1]
@@ -16,15 +16,20 @@ from include.supabase_swpc_writer import SupabaseSwpcWriter
 from include.swpc.endpoints import SWPC_ENDPOINTS
 from include.swpc.pipeline import ingest_endpoint, summarize_ingest
 
+RUN_TIMEOUT = dt.timedelta(minutes=30)
+RETRY_DELAY = dt.timedelta(seconds=10)
+RETRIES = 2
+
+
 
 @dag(
     dag_id="swpc_realtime_etl",
-    schedule="*/10 * * * *",
+    schedule=dt.timedelta(hours=10),
     start_date=pendulum.datetime(2026, 1, 1, tz="UTC"),
     catchup=False,
     max_active_runs=1,
-    dagrun_timeout=dt.timedelta(minutes=9),
-    default_args={"retries": 2, "retry_delay": dt.timedelta(seconds=10)},
+    dagrun_timeout=RUN_TIMEOUT,
+    default_args={"retries": RETRIES, "retry_delay": RETRY_DELAY},
     tags=["swpc", "space-weather", "near-real-time"],
 )
 def swpc_realtime_etl():
@@ -40,7 +45,7 @@ def swpc_realtime_etl():
             for endpoint in SWPC_ENDPOINTS
         ]
 
-    @task(pool="swpc_http")
+    @task(max_active_tis_per_dag=4)
     def ingest_swpc_endpoint(endpoint: dict[str, object]) -> dict[str, object]:
         writer = SupabaseSwpcWriter()
         return ingest_endpoint(writer, endpoint).to_dict()
@@ -67,7 +72,7 @@ def swpc_realtime_etl():
         trigger_run_id="swpc_event_window__{{ run_id }}",
         conf={"source_dag_run_id": "{{ run_id }}"},
         reset_dag_run=True,
-        wait_for_completion=False,
+        wait_for_completion=True,
     )
     alert_task >> derive_event_windows
 

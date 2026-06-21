@@ -5,7 +5,7 @@ import sys
 import unittest
 from pathlib import Path
 from typing import Any
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 
 
 AIRFLOW_ROOT = Path(__file__).resolve().parents[3]
@@ -213,6 +213,48 @@ class SwpcFetchSchemaTest(unittest.TestCase):
         self.assertEqual(result.payload_hash, "b" * 64)
         self.assertIsNotNone(result.error)
         self.assertTrue(result.error.startswith("invalid_json:"))
+        self.assertEqual(result.endpoint_state_row["last_error"], result.error)
+
+    def test_fetch_http_error_returns_error_without_failing_task(self) -> None:
+        error = HTTPError(
+            "https://services.swpc.noaa.gov/products/alerts.json",
+            503,
+            "Service Unavailable",
+            {"ETag": '"old"'},
+            None,
+        )
+        opener = FakeOpener(error=error)
+
+        result = fetch_swpc_endpoint_json(
+            "/products/alerts.json",
+            endpoint_state={"payload_hash": "d" * 64},
+            opener=opener,
+            now=dt.datetime(2026, 6, 20, 21, 33, tzinfo=dt.UTC),
+        )
+
+        self.assertFalse(result.changed)
+        self.assertIsNone(result.raw_payload_row)
+        self.assertEqual(result.status_code, 503)
+        self.assertEqual(result.payload_hash, "d" * 64)
+        self.assertEqual(result.error, "http_error: 503 Service Unavailable")
+        self.assertEqual(result.endpoint_state_row["last_error"], result.error)
+
+    def test_fetch_url_error_returns_error_without_failing_task(self) -> None:
+        opener = FakeOpener(error=URLError("timed out"))
+
+        result = fetch_swpc_endpoint_json(
+            "/products/alerts.json",
+            endpoint_state={"payload_hash": "e" * 64},
+            opener=opener,
+            now=dt.datetime(2026, 6, 20, 21, 34, tzinfo=dt.UTC),
+        )
+
+        self.assertFalse(result.changed)
+        self.assertIsNone(result.raw_payload_row)
+        self.assertEqual(result.status_code, 0)
+        self.assertEqual(result.payload_hash, "e" * 64)
+        self.assertIsNotNone(result.error)
+        self.assertTrue(result.error.startswith("fetch_error:"))
         self.assertEqual(result.endpoint_state_row["last_error"], result.error)
 
     def test_schema_setup_and_raw_upsert_are_idempotent_shapes(self) -> None:

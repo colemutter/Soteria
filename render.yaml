@@ -61,3 +61,8 @@ services:
         sync: false
       - key: VITE_SUPABASE_ANON_KEY
         sync: false
+      # Base URL of the backend API. Inlined into the static bundle at BUILD time,
+      # so a rebuild is required for changes to take effect. Required for adding/
+      # restoring satellites (they persist via the backend, not Supabase directly).
+      - key: VITE_API_BASE_URL
+        value: https://soteria-backend.onrender.com

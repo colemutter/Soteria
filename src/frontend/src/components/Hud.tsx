@@ -1,94 +1,45 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useState } from 'react'
 import { simClock } from '../lib/simClock'
 import { geodeticAt, orbitalElements, type GeodeticInfo } from '../lib/orbital'
-import type { DangerLevel, SatelliteEntry } from '../data/satellites'
-import { searchSatellites, type TleRecord } from '../lib/tleApi'
+import type { SatelliteEntry } from '../data/satellites'
+import { DangerIcon, DANGER_LABELS } from './DangerIcon'
 
 interface Props {
   satellites: SatelliteEntry[]
   selectedId: string | null
   onSelect: (id: string | null) => void
-  /** Add a theoretical satellite from a user-entered name + TLE. */
-  onAddTheoretical: (
-    name: string,
-    line1: string,
-    line2: string,
-  ) => SatelliteEntry
-  /** Add a real satellite from a looked-up live element set. */
-  onAddReal: (record: TleRecord) => SatelliteEntry
   shadingOn: boolean
   onToggleShading: () => void
+  solarWindOn: boolean
+  onToggleSolarWind: () => void
+  geomagOn: boolean
+  onToggleGeomag: () => void
 }
 
-/** Which step of the add-satellite flow is showing. */
-type AddMode = null | 'choose' | 'theoretical' | 'real'
+/** Timeline span: the paused slider reaches this far into the future. */
+const TIMELINE_SPAN_MS = 2 * 24 * 60 * 60 * 1000 // 2 days
 
-/** Status colours for the three threat levels. */
-const DANGER_COLORS: Record<DangerLevel, string> = {
-  safe: '#46e08a',
-  caution: '#ffc24f',
-  critical: '#ff5a5a',
-}
-
-const DANGER_LABELS: Record<DangerLevel, string> = {
-  safe: 'Nominal — no close approaches',
-  caution: 'Caution — object worth watching',
-  critical: 'Critical — imminent close approach',
-}
-
-/**
- * Threat-status icon, tinted by level. `safe` shows a shield-check; `caution`
- * and `critical` show a warning triangle (distinguished by colour). The cut-out
- * marks use the panel background colour so they read on any tint.
- */
-function DangerIcon({ level, size = 15 }: { level: DangerLevel; size?: number }) {
-  const color = DANGER_COLORS[level]
-  if (level === 'safe') {
-    return (
-      <svg
-        className="status-icon"
-        width={size}
-        height={size}
-        viewBox="0 0 24 24"
-        style={{ color }}
-        aria-hidden="true"
-      >
-        <path d="M12 2 4 5v6c0 5 3.4 8.6 8 10 4.6-1.4 8-5 8-10V5z" fill="currentColor" />
-        <path
-          d="M8.4 12l2.6 2.6L15.8 9.2"
-          fill="none"
-          stroke="#0c1019"
-          strokeWidth="2.4"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-      </svg>
-    )
-  }
-  return (
-    <svg
-      className="status-icon"
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      style={{ color }}
-      aria-hidden="true"
-    >
-      <path d="M12 2.5 1.2 21.5h21.6z" fill="currentColor" />
-      <rect x="11" y="8.5" width="2" height="6" rx="1" fill="#0c1019" />
-      <rect x="11" y="16.4" width="2" height="2" rx="1" fill="#0c1019" />
-    </svg>
-  )
+/** Format a future offset (ms) as e.g. "+0h", "+14h 30m", "+1d 6h", "+2d". */
+function formatOffset(ms: number): string {
+  const totalMin = Math.round(ms / 60000)
+  const d = Math.floor(totalMin / 1440)
+  const h = Math.floor((totalMin % 1440) / 60)
+  const m = totalMin % 60
+  if (d > 0) return `+${d}d${h > 0 ? ` ${h}h` : ''}`
+  if (h > 0) return `+${h}h${m > 0 ? ` ${m}m` : ''}`
+  return `+${m}m`
 }
 
 export function Hud({
   satellites,
   selectedId,
   onSelect,
-  onAddTheoretical,
-  onAddReal,
   shadingOn,
   onToggleShading,
+  solarWindOn,
+  onToggleSolarWind,
+  geomagOn,
+  onToggleGeomag,
 }: Props) {
   // Re-render a few times a second to mirror the (mutable) clock in the UI.
   const [, force] = useState(0)
@@ -101,76 +52,11 @@ export function Hud({
     }
   }, [])
 
-  // "Add satellite" flow state. `addMode` walks: closed → choose → real/theoretical.
-  const [addMode, setAddMode] = useState<AddMode>(null)
-  // Theoretical sub-form.
-  const [newName, setNewName] = useState('')
-  const [newTle, setNewTle] = useState('')
-  const [addError, setAddError] = useState<string | null>(null)
-  // Real (lookup) sub-form.
-  const [query, setQuery] = useState('')
-  const [searching, setSearching] = useState(false)
-  const [results, setResults] = useState<TleRecord[] | null>(null)
-  const [searchError, setSearchError] = useState<string | null>(null)
-
-  const closeAddForm = () => {
-    setAddMode(null)
-    setNewName('')
-    setNewTle('')
-    setAddError(null)
-    setQuery('')
-    setResults(null)
-    setSearchError(null)
-  }
-
-  const handleAddTheoretical = (e: FormEvent) => {
-    e.preventDefault()
-    const name = newName.trim()
-    if (!name) {
-      setAddError('Enter a name for the satellite.')
-      return
-    }
-    // Accept a pasted 2-line TLE, or a 3-line one (name + 2 lines): take the
-    // last two non-empty lines as the element set.
-    const lines = newTle
-      .split('\n')
-      .map((l) => l.trim())
-      .filter(Boolean)
-    if (lines.length < 2) {
-      setAddError('Paste the two TLE element lines.')
-      return
-    }
-    const line1 = lines[lines.length - 2]
-    const line2 = lines[lines.length - 1]
-    const entry = onAddTheoretical(name, line1, line2)
-    if (entry.error) {
-      setAddError(`Invalid trajectory data: ${entry.error}`)
-      return
-    }
-    closeAddForm()
-  }
-
-  const handleSearch = async (e: FormEvent) => {
-    e.preventDefault()
-    const q = query.trim()
-    if (!q) return
-    setSearching(true)
-    setSearchError(null)
-    setResults(null)
-    try {
-      const found = await searchSatellites(q)
-      setResults(found)
-    } catch {
-      setSearchError('Lookup failed — check your connection and try again.')
-    } finally {
-      setSearching(false)
-    }
-  }
-
-  const handlePickReal = (record: TleRecord) => {
-    onAddReal(record)
-    closeAddForm()
-  }
+  // Timeline scrubbing state lives on the simClock singleton (so it survives
+  // this component unmounting, e.g. switching views). Pause opens the timeline
+  // anchored at "now"; the slider spans [anchor, anchor + 2 days].
+  const showTimeline = !simClock.playing && simClock.scrubBaseMs != null
+  const scrubOffset = simClock.scrubOffsetMs()
 
   const selected = satellites.find((s) => s.id === selectedId)
   let info: GeodeticInfo | null = null
@@ -221,136 +107,6 @@ export function Hud({
               </button>
             ))}
           </div>
-
-          {addMode === null && (
-            <button
-              className="add-sat-toggle"
-              onClick={() => setAddMode('choose')}
-            >
-              + Add satellite
-            </button>
-          )}
-
-          {addMode === 'choose' && (
-            <div className="add-sat-form">
-              <p className="add-sat-prompt">What kind of satellite?</p>
-              <div className="add-sat-choices">
-                <button
-                  className="add-sat-choice"
-                  onClick={() => setAddMode('real')}
-                >
-                  <span className="add-sat-choice-title">Real</span>
-                  <span className="add-sat-choice-sub">
-                    Look up live orbital data
-                  </span>
-                </button>
-                <button
-                  className="add-sat-choice"
-                  onClick={() => setAddMode('theoretical')}
-                >
-                  <span className="add-sat-choice-title">Theoretical</span>
-                  <span className="add-sat-choice-sub">
-                    Enter your own trajectory
-                  </span>
-                </button>
-              </div>
-              <div className="add-sat-actions">
-                <button className="add-sat-btn" onClick={closeAddForm}>
-                  Cancel
-                </button>
-              </div>
-            </div>
-          )}
-
-          {addMode === 'theoretical' && (
-            <form className="add-sat-form" onSubmit={handleAddTheoretical}>
-              <input
-                className="add-sat-field"
-                placeholder="Satellite name"
-                value={newName}
-                onChange={(e) => setNewName(e.target.value)}
-                autoFocus
-              />
-              <textarea
-                className="add-sat-field add-sat-tle"
-                placeholder={
-                  'Paste TLE (two element lines)\n1 25544U 98067A   ...\n2 25544  51.6413 ...'
-                }
-                value={newTle}
-                onChange={(e) => setNewTle(e.target.value)}
-                rows={4}
-                spellCheck={false}
-              />
-              {addError && <p className="add-sat-error">{addError}</p>}
-              <div className="add-sat-actions">
-                <button
-                  type="button"
-                  className="add-sat-btn"
-                  onClick={() => setAddMode('choose')}
-                >
-                  Back
-                </button>
-                <button type="submit" className="add-sat-btn primary">
-                  Add satellite
-                </button>
-              </div>
-            </form>
-          )}
-
-          {addMode === 'real' && (
-            <div className="add-sat-form">
-              <form className="add-sat-search" onSubmit={handleSearch}>
-                <input
-                  className="add-sat-field"
-                  placeholder="Search by name (e.g. Hubble, Starlink)"
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  autoFocus
-                />
-                <button
-                  type="submit"
-                  className="add-sat-btn primary"
-                  disabled={searching || !query.trim()}
-                >
-                  {searching ? '…' : 'Search'}
-                </button>
-              </form>
-
-              {searchError && <p className="add-sat-error">{searchError}</p>}
-
-              {results && results.length === 0 && (
-                <p className="add-sat-empty">No satellites found.</p>
-              )}
-
-              {results && results.length > 0 && (
-                <ul className="add-sat-results">
-                  {results.slice(0, 8).map((r) => (
-                    <li key={r.satelliteId}>
-                      <button
-                        className="add-sat-result"
-                        onClick={() => handlePickReal(r)}
-                        title={`Add ${r.name} (NORAD ${r.satelliteId})`}
-                      >
-                        <span className="add-sat-result-name">{r.name}</span>
-                        <span className="add-sat-result-id">
-                          #{r.satelliteId}
-                        </span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-
-              <div className="add-sat-actions">
-                <button
-                  className="add-sat-btn"
-                  onClick={() => setAddMode('choose')}
-                >
-                  Back
-                </button>
-              </div>
-            </div>
-          )}
         </div>
 
         <div className="panel panel-pane panel-alerts">
@@ -373,34 +129,91 @@ export function Hud({
         </div>
       </div>
 
-      {/* Bottom-center: real-time clock */}
-      <div className="panel panel-clock">
-        <button className="clock-btn" onClick={() => simClock.togglePlay()}>
-          {simClock.playing ? '❚❚' : '▶'}
-        </button>
-        <div className="clock-time">
-          <div className="clock-utc">{simClock.date.toUTCString()}</div>
-          <div className="clock-status">
-            <span className={`live-dot ${simClock.playing ? 'on' : ''}`} />
-            {simClock.playing ? 'LIVE · real time' : 'paused'}
+      {/* Bottom-center: clock + (when paused) timeline scrubber */}
+      <div className={`panel panel-clock ${showTimeline ? 'has-timeline' : ''}`}>
+        <div className="clock-row">
+          <button
+            className="clock-btn"
+            onClick={() => simClock.togglePlay()}
+            title={simClock.playing ? 'Pause & open timeline' : 'Resume live'}
+          >
+            {simClock.playing ? '❚❚' : '▶'}
+          </button>
+          <div className="clock-time">
+            <div className="clock-utc">{simClock.date.toUTCString()}</div>
+            <div className="clock-status">
+              <span className={`live-dot ${simClock.playing ? 'on' : ''}`} />
+              {simClock.playing
+                ? 'LIVE · real time'
+                : `timeline · ${formatOffset(scrubOffset)}`}
+            </div>
           </div>
         </div>
+
+        {showTimeline && (
+          <div className="timeline">
+            <input
+              className="timeline-slider"
+              type="range"
+              min={0}
+              max={TIMELINE_SPAN_MS}
+              step={60000}
+              value={scrubOffset}
+              onChange={(e) => simClock.scrubTo(Number(e.target.value))}
+            />
+            <div className="timeline-labels">
+              <span>now</span>
+              <span>+2 days</span>
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* Bottom-right: day/night shading toggle */}
-      <button
-        className={`panel shading-toggle ${shadingOn ? 'on' : ''}`}
-        onClick={onToggleShading}
-        title="Toggle day/night shading"
-      >
-        <span className={`toggle-track ${shadingOn ? 'on' : ''}`}>
-          <span className="toggle-knob" />
-        </span>
-        <span className="toggle-label">
-          Day / Night Shading
-          <span className="toggle-state">{shadingOn ? 'ON' : 'OFF'}</span>
-        </span>
-      </button>
+      {/* Bottom-right: layer toggles, grouped in one pane */}
+      <div className="panel toggle-pane">
+        <div className="pane-title">Layers</div>
+        <button
+          className={`ui-toggle ${solarWindOn ? 'on' : ''}`}
+          onClick={onToggleSolarWind}
+          title="Toggle the solar-wind particle visualization"
+        >
+          <span className={`toggle-track ${solarWindOn ? 'on' : ''}`}>
+            <span className="toggle-knob" />
+          </span>
+          <span className="toggle-label">
+            Solar Wind
+            <span className="toggle-state">{solarWindOn ? 'ON' : 'OFF'}</span>
+          </span>
+        </button>
+
+        <button
+          className={`ui-toggle ${geomagOn ? 'on' : ''}`}
+          onClick={onToggleGeomag}
+          title="Toggle the geomagnetic (auroral oval) layer"
+        >
+          <span className={`toggle-track ${geomagOn ? 'on' : ''}`}>
+            <span className="toggle-knob" />
+          </span>
+          <span className="toggle-label">
+            Geomagnetic
+            <span className="toggle-state">{geomagOn ? 'ON' : 'OFF'}</span>
+          </span>
+        </button>
+
+        <button
+          className={`ui-toggle ${shadingOn ? 'on' : ''}`}
+          onClick={onToggleShading}
+          title="Toggle day/night shading"
+        >
+          <span className={`toggle-track ${shadingOn ? 'on' : ''}`}>
+            <span className="toggle-knob" />
+          </span>
+          <span className="toggle-label">
+            Day / Night Shading
+            <span className="toggle-state">{shadingOn ? 'ON' : 'OFF'}</span>
+          </span>
+        </button>
+      </div>
 
       {/* Right: selected satellite detail */}
       {selected && (

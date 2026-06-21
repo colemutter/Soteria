@@ -395,20 +395,35 @@
   font-style: italic;
 }
 
-/* ---- shading toggle (bottom-right) ---- */
-.shading-toggle {
+/* ---- layer toggles, grouped in one pane (bottom-right) ---- */
+.toggle-pane {
   bottom: 22px;
   right: 20px;
+  width: 214px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.toggle-pane .pane-title {
+  margin-bottom: 6px;
+}
+.ui-toggle {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 9px 14px;
+  width: 100%;
+  padding: 7px 8px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
   color: #cdd5e6;
   cursor: pointer;
   font: inherit;
+  text-align: left;
 }
-.shading-toggle:hover {
-  border-color: rgba(120, 160, 230, 0.4);
+.ui-toggle:hover {
+  background: rgba(120, 160, 230, 0.1);
 }
 .toggle-track {
   position: relative;
@@ -451,7 +466,7 @@
   letter-spacing: 1px;
   color: #6b7691;
 }
-.shading-toggle.on .toggle-state {
+.ui-toggle.on .toggle-state {
   color: #4fd1ff;
 }
 
@@ -461,9 +476,17 @@
   left: 50%;
   transform: translateX(-50%);
   display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px 16px;
+}
+.panel-clock.has-timeline {
+  width: 460px;
+}
+.clock-row {
+  display: flex;
   align-items: center;
   gap: 14px;
-  padding: 10px 16px;
 }
 .clock-btn {
   width: 36px;
@@ -507,6 +530,51 @@
 .live-dot.on {
   background: #46e08a;
   box-shadow: 0 0 8px #46e08a;
+}
+
+/* ---- timeline scrubber ---- */
+.timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.timeline-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 4px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #4fd1ff, #7e8aa6);
+  outline: none;
+  cursor: pointer;
+}
+.timeline-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid #4fd1ff;
+  box-shadow: 0 0 8px rgba(79, 209, 255, 0.6);
+  cursor: pointer;
+}
+.timeline-slider::-moz-range-thumb {
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid #4fd1ff;
+  box-shadow: 0 0 8px rgba(79, 209, 255, 0.6);
+  cursor: pointer;
+}
+.timeline-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 9.5px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: #7e8aa6;
 }
 
 /* ---- info ---- */
@@ -564,4 +632,139 @@
   color: #fff;
   transform: translateY(-50%);
   pointer-events: none;
+}
+
+/* ---- top navbar (view switcher) ---- */
+.navbar {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 20;
+}
+.nav-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 999px;
+  background: rgba(12, 16, 28, 0.78);
+  border: 1px solid rgba(120, 160, 230, 0.18);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+}
+.nav-tab {
+  padding: 7px 20px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: #9aa6c2;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.nav-tab:hover {
+  color: #e8ecf5;
+}
+.nav-tab.active {
+  background: rgba(120, 160, 230, 0.22);
+  color: #fff;
+  box-shadow: inset 0 0 0 1px rgba(120, 160, 230, 0.5);
+}
+
+/* ---- satellites view (full-screen management screen) ---- */
+.sats-view {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  background: radial-gradient(120% 90% at 70% 10%, #0a1020 0%, #05070f 70%);
+  display: flex;
+  gap: 20px;
+  padding: 80px 24px 24px;
+  box-sizing: border-box;
+}
+.sats-roster {
+  position: relative; /* override .panel's absolute */
+  width: 320px;
+  flex: none;
+  padding: 16px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+.sats-roster .add-sat-toggle {
+  margin-top: 14px;
+}
+.sats-detail {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.model-stage {
+  position: relative; /* override .panel's absolute */
+  flex: 1;
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+}
+.model-canvas {
+  width: 100% !important;
+  height: 100% !important;
+  display: block;
+}
+.model-hint {
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 10.5px;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: #6b7691;
+  pointer-events: none;
+}
+.model-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #6b7691;
+  font-style: italic;
+}
+.sats-details-card {
+  position: relative; /* override .panel's absolute */
+  flex: none;
+  padding: 18px 20px;
+}
+.sats-details-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.sats-details-head h2 {
+  margin: 0 0 6px;
+  font-size: 18px;
+}
+.sats-kind {
+  flex: none;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: #7e8aa6;
+}
+.sats-empty {
+  position: relative; /* override .panel's absolute */
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #6b7691;
+  font-style: italic;
 }

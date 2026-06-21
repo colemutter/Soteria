@@ -5,6 +5,8 @@ import { DirectionalLight, Vector3 } from 'three'
 import { Earth } from './Earth'
 import { SatelliteObject } from './SatelliteObject'
 import { CameraRig } from './CameraRig'
+import { SolarWind } from './SolarWind'
+import { GeomagLayer } from './GeomagLayer'
 import { SCENE_EARTH_RADIUS, maxOrbitRadiusScene } from '../lib/orbital'
 import { sunDirection } from '../lib/sun'
 import { simClock } from '../lib/simClock'
@@ -63,9 +65,18 @@ interface Props {
   selectedId: string | null
   onSelect: (id: string | null) => void
   shadingOn: boolean
+  solarWindOn: boolean
+  geomagOn: boolean
 }
 
-export function Scene({ satellites, selectedId, onSelect, shadingOn }: Props) {
+export function Scene({
+  satellites,
+  selectedId,
+  onSelect,
+  shadingOn,
+  solarWindOn,
+  geomagOn,
+}: Props) {
   const renderable = satellites.filter((s) => !s.error)
   const selected = satellites.find((s) => s.id === selectedId) ?? null
 
@@ -99,6 +110,10 @@ export function Scene({ satellites, selectedId, onSelect, shadingOn }: Props) {
       <SunLight />
 
       <Stars radius={300} depth={60} count={6000} factor={6} fade speed={0.4} />
+
+      {/* Solar-wind particles driven by live space-weather data. */}
+      {solarWindOn && <SolarWind />}
+      {geomagOn && <GeomagLayer />}
 
       <Suspense fallback={null}>
         <Earth shadingOn={shadingOn} />

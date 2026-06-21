@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { Scene } from './components/Scene'
 import { Hud } from './components/Hud'
+import { Navbar, type AppView } from './components/Navbar'
+import { SatellitesView } from './components/SatellitesView'
 import {
   SATELLITES,
   createUserSatellite,
@@ -17,10 +19,16 @@ import './App.css'
 const REAL_REFRESH_MS = 10 * 60 * 1000 // ~10 minutes
 
 function App() {
+  // Which top-level view is active. 'map' is the default globe view.
+  const [view, setView] = useState<AppView>('map')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   // When false, the Earth shader's day/night + ocean effects are bypassed and a
   // plain, fully-lit textured globe is shown.
   const [shadingOn, setShadingOn] = useState(true)
+  // Toggles the live solar-wind particle visualization.
+  const [solarWindOn, setSolarWindOn] = useState(true)
+  // Toggles the geomagnetic (auroral oval) layer.
+  const [geomagOn, setGeomagOn] = useState(true)
   // The live satellite list: seeded with the built-ins, grown by the UI.
   const [satellites, setSatellites] = useState<SatelliteEntry[]>(SATELLITES)
 
@@ -110,21 +118,42 @@ function App() {
 
   return (
     <div className="app">
+      {/* The globe stays mounted across views (preserves camera state); the
+          Satellites view is a full-screen panel that sits over it. */}
       <Scene
         satellites={satellites}
         selectedId={selectedId}
         onSelect={setSelectedId}
         shadingOn={shadingOn}
+        solarWindOn={solarWindOn}
+        geomagOn={geomagOn}
       />
-      <Hud
-        satellites={satellites}
-        selectedId={selectedId}
-        onSelect={setSelectedId}
-        onAddTheoretical={addTheoretical}
-        onAddReal={addReal}
-        shadingOn={shadingOn}
-        onToggleShading={() => setShadingOn((v) => !v)}
-      />
+
+      {view === 'map' && (
+        <Hud
+          satellites={satellites}
+          selectedId={selectedId}
+          onSelect={setSelectedId}
+          shadingOn={shadingOn}
+          onToggleShading={() => setShadingOn((v) => !v)}
+          solarWindOn={solarWindOn}
+          onToggleSolarWind={() => setSolarWindOn((v) => !v)}
+          geomagOn={geomagOn}
+          onToggleGeomag={() => setGeomagOn((v) => !v)}
+        />
+      )}
+
+      {view === 'satellites' && (
+        <SatellitesView
+          satellites={satellites}
+          selectedId={selectedId}
+          onSelect={setSelectedId}
+          onAddTheoretical={addTheoretical}
+          onAddReal={addReal}
+        />
+      )}
+
+      <Navbar view={view} onChangeView={setView} />
     </div>
   )
 }

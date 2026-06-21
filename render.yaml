@@ -28,6 +28,10 @@ services:
           property: connectionString
       - key: FRONTEND_ORIGIN
         value: https://soteria-frontend.onrender.com
+      - key: FRONTEND_ORIGINS
+        value: https://soteria-frontend.onrender.com
+      - key: FRONTEND_ORIGIN_REGEX
+        value: 'https://.*\.onrender\.com'
 
   - type: worker
     name: soteria-poller

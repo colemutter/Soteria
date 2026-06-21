@@ -82,36 +82,78 @@ export function conditionsAt(ds: SolarDataset, date: Date): SolarConditions {
 }
 
 /** Pull all three driver series from one of the forecast tables. */
-async function fetchFromTable(table: string): Promise<SolarDataset | null> {
+const PAGE = 1000 // PostgREST caps each request at 1000 rows
+// The real feed's Bz/Bt both come from this SWPC endpoint, which is indexed
+// (endpoint, valid_start). Filtering by endpoint is ~20× faster than by
+// product_type (which can't use the index) and returns exactly Bz + Bt.
+const MAG_ENDPOINT = '/json/rtsw/rtsw_mag_1m.json'
+
+/**
+ * Fetch the magnetic-field rows newest-first. With `full`, page through the
+ * whole high-cadence series in parallel (the API caps at 1000 rows/request) so
+ * a chart can span all the hours that exist; otherwise just the latest page
+ * (enough for the layers, which only sample near "now").
+ */
+async function fetchMagRows(
+  table: string,
+  full: boolean,
+): Promise<ForecastRow[]> {
+  if (!supabase) return []
+  const isDemo = table.endsWith('_demo')
+  const page = (from: number) => {
+    const base = supabase!.from(table).select('product_type,value,valid_start')
+    const filtered = isDemo
+      ? base.in('product_type', ['solar_wind_mag_bz_gsm', 'solar_wind_mag_bt'])
+      : base.eq('endpoint', MAG_ENDPOINT)
+    return filtered
+      .order('valid_start', { ascending: false })
+      .range(from, from + PAGE - 1)
+  }
+  if (!full) {
+    const { data } = await page(0)
+    return (data ?? []) as ForecastRow[]
+  }
+  // 14 pages ≈ 14k rows covers the current IMF history with margin; empty pages
+  // beyond the data just return nothing. Parallel = one round-trip of latency.
+  const pages = await Promise.all(
+    Array.from({ length: 14 }, (_, p) => page(p * PAGE)),
+  )
+  const out: ForecastRow[] = []
+  for (const { data, error } of pages) {
+    if (!error && data) out.push(...(data as ForecastRow[]))
+  }
+  return out
+}
+
+async function fetchFromTable(
+  table: string,
+  full = false,
+): Promise<SolarDataset | null> {
   if (!supabase) return null
-  const { data, error } = await supabase
-    .from(table)
-    .select('product_type,value,valid_start')
-    .in('product_type', [
-      'kp_history',
-      'kp_forecast',
-      'solar_wind_mag_bz_gsm',
-      'solar_wind_mag_bt',
-    ])
-    .order('valid_start', { ascending: true })
-    .limit(2000)
-  if (error || !data) return null
-  const rows = data as ForecastRow[]
+  // Query Kp and the magnetic field separately, NEWEST-FIRST: the IMF products
+  // are high-cadence, so a single ascending+limit query would return the oldest
+  // rows and drop both the recent observations and the Kp forecast.
+  const [kpRes, magRows] = await Promise.all([
+    supabase
+      .from(table)
+      .select('product_type,value,valid_start')
+      .in('product_type', ['kp_history', 'kp_forecast'])
+      .order('valid_start', { ascending: false })
+      .limit(1500),
+    fetchMagRows(table, full),
+  ])
+  if (kpRes.error) return null
+  const kpRows = (kpRes.data ?? []) as ForecastRow[]
   // kp_history + kp_forecast merge into one Kp series.
-  const kp = buildSeries(rows, 'kp_history').concat(
-    buildSeries(rows, 'kp_forecast'),
+  const kp = buildSeries(kpRows, 'kp_history').concat(
+    buildSeries(kpRows, 'kp_forecast'),
   )
   kp.sort((a, b) => a.t - b.t)
   return {
     kpSeries: kp,
-    bzSeries: buildSeries(rows, 'solar_wind_mag_bz_gsm'),
-    btSeries: buildSeries(rows, 'solar_wind_mag_bt'),
+    bzSeries: buildSeries(magRows, 'solar_wind_mag_bz_gsm'),
+    btSeries: buildSeries(magRows, 'solar_wind_mag_bt'),
   }
-}
-
-/** Live data from the real forecast table. */
-function fetchSolarDataset(): Promise<SolarDataset | null> {
-  return fetchFromTable('swpc_forecast_records')
 }
 
 /** Shift a series so its earliest sample lands at `anchor` (ms). */
@@ -143,7 +185,7 @@ function generateDemoSeries(): SolarDataset {
 /** Demo data from the demo table, re-anchored to start "now"; falls back to the
  * generated profile if the table is missing/empty. */
 async function fetchDemoDataset(): Promise<SolarDataset> {
-  const ds = await fetchFromTable('swpc_forecast_records_demo')
+  const ds = await fetchFromTable('swpc_forecast_records_demo', true)
   const all = ds ? [...ds.kpSeries, ...ds.bzSeries, ...ds.btSeries] : []
   if (!ds || all.length === 0) return generateDemoSeries()
   const minT = Math.min(...all.map((p) => p.t))
@@ -155,30 +197,32 @@ async function fetchDemoDataset(): Promise<SolarDataset> {
   }
 }
 
-const cache: Record<'real' | 'demo', { ds: SolarDataset; at: number } | null> =
-  { real: null, demo: null }
-const inflight: Record<'real' | 'demo', Promise<SolarDataset | null> | null> = {
-  real: null,
-  demo: null,
-}
+const cache = new Map<string, { ds: SolarDataset; at: number }>()
+const inflight = new Map<string, Promise<SolarDataset | null>>()
 
 /**
- * Cached accessor shared across layers. `demo` selects the synthetic escalating
- * storm dataset (from the demo table) instead of the live feed.
+ * Cached accessor shared across layers and the weather charts. `demo` selects
+ * the synthetic escalating-storm dataset; `full` pages through the entire IMF
+ * history (for the charts) instead of just the latest page (for the layers).
  */
 export async function getSolarDataset(
   demo = false,
+  full = false,
   maxAgeMs = 5 * 60 * 1000,
 ): Promise<SolarDataset | null> {
-  const key = demo ? 'demo' : 'real'
-  const c = cache[key]
+  const key = `${demo ? 'demo' : 'real'}:${full ? 'full' : 'light'}`
+  const c = cache.get(key)
   if (c && Date.now() - c.at < maxAgeMs) return c.ds
-  if (inflight[key]) return inflight[key]
-  inflight[key] = (async () => {
-    const ds = demo ? await fetchDemoDataset() : await fetchSolarDataset()
-    if (ds) cache[key] = { ds, at: Date.now() }
-    inflight[key] = null
+  const existing = inflight.get(key)
+  if (existing) return existing
+  const promise = (async () => {
+    const ds = demo
+      ? await fetchDemoDataset()
+      : await fetchFromTable('swpc_forecast_records', full)
+    if (ds) cache.set(key, { ds, at: Date.now() })
+    inflight.delete(key)
     return ds
   })()
-  return inflight[key]
+  inflight.set(key, promise)
+  return promise
 }

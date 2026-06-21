@@ -3,6 +3,7 @@ import { Scene } from './components/Scene'
 import { Hud } from './components/Hud'
 import { Navbar, type AppView } from './components/Navbar'
 import { SatellitesView } from './components/SatellitesView'
+import { WeatherView } from './components/WeatherView'
 import {
   SATELLITES,
   createUserSatellite,
@@ -181,6 +182,8 @@ function App() {
           onAddReal={addReal}
         />
       )}
+
+      {view === 'weather' && <WeatherView demo={demoOn} />}
 
       <Navbar view={view} onChangeView={setView} />
     </div>

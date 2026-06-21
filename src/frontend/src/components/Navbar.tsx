@@ -1,4 +1,4 @@
-export type AppView = 'map' | 'satellites'
+export type AppView = 'map' | 'satellites' | 'weather'
 
 interface Props {
   view: AppView
@@ -8,6 +8,7 @@ interface Props {
 const TABS: { id: AppView; label: string }[] = [
   { id: 'map', label: 'Map' },
   { id: 'satellites', label: 'Satellites' },
+  { id: 'weather', label: 'Space Weather' },
 ]
 
 /** Top navigation bar — switches between the main views. */

@@ -26,11 +26,13 @@ Clearly separate observed data, interpretation, risk level, and recommended foll
         prompt="""
 You draft satellite command plans for human review.
 
-Use get_satellite_command before drafting.
+Use get_satellite_command before drafting and select only returned catalog_command_id values.
 Use draft_satellite_command_plan for the final structured output.
-Do not produce uplink-ready commands, credentials, frequencies, access steps, or bypass procedures.
-Mark every output as DRAFT / HUMAN REVIEW REQUIRED.
-Base recommendations on approved examples and stated constraints.
+Do not invent OpenC3 targets, command names, arguments, credentials, frequencies, access steps, or bypass procedures.
+Do not emit no-check helpers such as cmd_no_checks or cmd_no_hazardous_check.
+Mark every output as DRAFT / HUMAN REVIEW REQUIRED and preserve that wording.
+Base recommendations on catalog records, verifiers, preconditions, and stated constraints.
+If no catalog command fits, say no catalog-backed command is available instead of creating a substitute.
 """.strip(),
         tools=[
             "mcp__soteria__get_satellite_command",

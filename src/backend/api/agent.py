@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 
-from fastapi import APIRouter, BackgroundTasks, status
+from fastapi import APIRouter, BackgroundTasks, Response, status
 from pydantic import BaseModel, ConfigDict
 
 from .poller import EventWindowReactionBatch, EventWindowReactionMessage
@@ -27,18 +27,22 @@ class AgentReactionAccepted(BaseModel):
 
 
 try:
+    from agent.command_runbook_generation import generate_command_runbooks_for_reports
     from agent.report_generation import (
         EventWindowReportRunResult,
         generate_reports_for_event_windows,
         persist_report_run_result,
     )
+    from agent.report_pipeline import query_active_satellite_evidence
     from agent.tools import _get_supabase_client
 except ImportError:
+    from command_runbook_generation import generate_command_runbooks_for_reports
     from report_generation import (
         EventWindowReportRunResult,
         generate_reports_for_event_windows,
         persist_report_run_result,
     )
+    from report_pipeline import query_active_satellite_evidence
     from tools import _get_supabase_client
 
 
@@ -110,6 +114,7 @@ def build_reaction_agent_message(reaction: EventWindowReactionMessage) -> str:
 @poller_report_router.post("/report", response_model=EventWindowReportRunResult)
 async def create_poller_report(
     reaction_batch: EventWindowReactionBatch,
+    response: Response,
 ) -> EventWindowReportRunResult:
     """Generate validated reports from a Poller event-window batch."""
     session_id = f"poller:{reaction_batch.detected_at.isoformat()}"
@@ -130,4 +135,89 @@ async def create_poller_report(
     except Exception as exc:
         logger.exception("failed to persist poller report result: %s", exc)
         result.persistence_errors.append(str(exc))
+    try:
+        if result.reports:
+            satellite_result = query_active_satellite_evidence(client)
+            if satellite_result.validation_errors:
+                result.runbook_errors.extend(satellite_result.validation_errors)
+            active_satellite_count = len(satellite_result.satellites)
+            if active_satellite_count == 0:
+                result.runbook_errors.append(
+                    "No active satellites were available for command runbook "
+                    "generation."
+                )
+            runbook_rows = generate_command_runbooks_for_reports(
+                result.reports,
+                satellite_result.satellites,
+            )
+            result.runbooks_generated_count = len(runbook_rows)
+            expected_runbook_count = len(result.reports) * active_satellite_count
+            if result.runbooks_generated_count != expected_runbook_count:
+                result.runbook_errors.append(
+                    "Generated command runbook count did not match report and "
+                    "satellite scope: "
+                    f"{result.runbooks_generated_count}/{expected_runbook_count}."
+                )
+            result.runbooks_persisted_count = persist_command_runbook_rows(
+                client,
+                runbook_rows,
+            )
+            if result.runbooks_persisted_count != result.runbooks_generated_count:
+                result.runbook_errors.append(
+                    "Persisted command runbook count did not match generated "
+                    "count: "
+                    f"{result.runbooks_persisted_count}/"
+                    f"{result.runbooks_generated_count}."
+                )
+    except Exception as exc:
+        logger.exception("failed to generate poller report command runbooks: %s", exc)
+        result.runbook_errors.append(str(exc))
+    _log_poller_report_result(result)
+    if _poller_report_has_pipeline_errors(result):
+        response.status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
     return result
+
+
+def persist_command_runbook_rows(client, rows: list[dict]) -> int:
+    """Upsert generated command runbooks by deterministic dedupe key."""
+    if not rows:
+        return 0
+    response = (
+        client.table("command_runbooks")
+        .upsert(rows, on_conflict="dedupe_key")
+        .execute()
+    )
+    return len(response.data or rows)
+
+
+def _poller_report_has_pipeline_errors(result: EventWindowReportRunResult) -> bool:
+    if result.status == "failed":
+        return True
+    if result.persistence_errors or result.runbook_errors:
+        return True
+    if result.runbooks_generated_count != result.runbooks_persisted_count:
+        return True
+    return False
+
+
+def _log_poller_report_result(result: EventWindowReportRunResult) -> None:
+    log = logger.error if _poller_report_has_pipeline_errors(result) else logger.info
+    log(
+        "poller report result status=%s reports=%s failures=%s persisted_reports=%s "
+        "runbooks_generated=%s runbooks_persisted=%s persistence_errors=%s "
+        "runbook_errors=%s validation_errors=%s requested_event_window_ids=%s",
+        result.status,
+        len(result.reports),
+        len(result.failures),
+        result.persisted_rows_count,
+        result.runbooks_generated_count,
+        result.runbooks_persisted_count,
+        _summarize_errors(result.persistence_errors),
+        _summarize_errors(result.runbook_errors),
+        _summarize_errors(result.validation_errors),
+        result.requested_event_window_ids,
+    )
+
+
+def _summarize_errors(errors: list[str]) -> list[str]:
+    return [str(error)[:300] for error in errors[:5]]

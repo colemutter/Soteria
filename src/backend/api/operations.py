@@ -22,6 +22,11 @@ SATELLITE_COLUMNS = (
     "ballistic_coefficient_kg_m2,position_time,latitude_deg,longitude_deg,"
     "altitude_km,speed_km_s,created_at,updated_at"
 )
+RUNBOOK_COLUMNS = (
+    "id,report_id,event_window_id,satellite_id,satellite_external_id,"
+    "catalog_version,policy_version,evidence_hash,dedupe_key,title,summary,"
+    "commands,risk_level,status,source,metadata,created_at,updated_at"
+)
 def _get_supabase_client() -> Any:
     url = os.getenv("SUPABASE_URL")
     key = (
@@ -121,6 +126,14 @@ class CommandRunbookResponse(BaseModel):
     runbook: dict[str, Any]
 
 
+class CommandRunbookListResponse(BaseModel):
+    runbooks: list[dict[str, Any]]
+
+
+class CommandRunbookDetailResponse(BaseModel):
+    runbook: dict[str, Any]
+
+
 @router.post(
     "/satellites",
     response_model=SatelliteUpsertResponse,
@@ -162,6 +175,59 @@ async def get_satellites(
     return SatelliteListResponse(satellites=[dict(row) for row in response.data or []])
 
 
+@router.get("/runbooks", response_model=CommandRunbookListResponse)
+async def get_runbooks(
+    report_id: str | None = None,
+    event_window_id: str | None = None,
+    satellite_id: str | None = None,
+    satellite_external_id: str | None = None,
+    status: str | None = None,
+    source: str | None = None,
+    limit: int = Query(default=100, ge=1, le=200),
+) -> CommandRunbookListResponse:
+    """Fetch generated command runbooks for operator review."""
+    query = (
+        _get_supabase_client()
+        .table("command_runbooks")
+        .select(RUNBOOK_COLUMNS)
+        .order("created_at", desc=True)
+        .limit(limit)
+    )
+    for column, value in (
+        ("report_id", report_id),
+        ("event_window_id", event_window_id),
+        ("satellite_id", satellite_id),
+        ("satellite_external_id", satellite_external_id),
+        ("status", status),
+        ("source", source),
+    ):
+        if value:
+            query = query.eq(column, value)
+
+    response = _execute_query(query, "Failed to fetch runbooks")
+    return CommandRunbookListResponse(runbooks=[dict(row) for row in response.data or []])
+
+
+@router.get("/runbooks/{runbook_id}", response_model=CommandRunbookDetailResponse)
+async def get_runbook(runbook_id: str) -> CommandRunbookDetailResponse:
+    """Fetch a generated command runbook by database ID."""
+    response = _execute_query(
+        _get_supabase_client()
+        .table("command_runbooks")
+        .select(RUNBOOK_COLUMNS)
+        .eq("id", runbook_id)
+        .limit(1),
+        "Failed to fetch runbook",
+    )
+    data = response.data or []
+    if not data:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Runbook not found",
+        )
+    return CommandRunbookDetailResponse(runbook=dict(data[0]))
+
+
 @router.post(
     "/runbooks/generated",
     response_model=CommandRunbookResponse,
@@ -176,7 +242,7 @@ async def receive_generated_runbook(
         row = validate_catalog_backed_runbook(row)
     except ValueError as exc:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=422,
             detail=str(exc),
         ) from exc
     response = _execute_query(

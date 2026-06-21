@@ -8,7 +8,7 @@ import logging
 import os
 from pathlib import Path
 from typing import Any, Protocol
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from dotenv import load_dotenv
@@ -182,17 +182,137 @@ class HttpReactionDispatcher:
         )
         try:
             with urlopen(request, timeout=self.timeout_seconds) as response:
-                if response.status >= 400:
-                    raise RuntimeError(
-                        f"reaction service returned HTTP {response.status}"
-                    )
-                logger.info(
-                    "http reaction dispatched event_window_count=%s status=%s",
-                    len(batch.event_windows),
+                response_body = response.read()
+                summary = _reaction_response_summary(response_body)
+                _log_reaction_response(
                     response.status,
+                    len(batch.event_windows),
+                    summary,
                 )
+                _raise_for_reaction_response_errors(response.status, summary)
+        except HTTPError as exc:
+            response_body = exc.read()
+            summary = _reaction_response_summary(response_body)
+            _log_reaction_response(
+                exc.code,
+                len(batch.event_windows),
+                summary,
+                is_error=True,
+            )
+            detail = _reaction_response_error_detail(summary, response_body)
+            raise RuntimeError(
+                f"reaction service returned HTTP {exc.code}: {detail}"
+            ) from exc
         except URLError as exc:
             raise RuntimeError(f"failed to dispatch reaction message: {exc}") from exc
+
+
+def _reaction_response_summary(response_body: bytes) -> dict[str, Any]:
+    if not response_body:
+        return {}
+    try:
+        payload = json.loads(response_body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return {"non_json_body": response_body[:500].decode("utf-8", errors="replace")}
+    if not isinstance(payload, dict):
+        return {"non_object_body": True}
+    return {
+        "status": payload.get("status"),
+        "requested_event_window_ids": payload.get("requested_event_window_ids") or [],
+        "reports_count": len(payload.get("reports") or []),
+        "failures_count": len(payload.get("failures") or []),
+        "persisted_rows_count": payload.get("persisted_rows_count"),
+        "persistence_errors": payload.get("persistence_errors") or [],
+        "runbooks_generated_count": payload.get("runbooks_generated_count"),
+        "runbooks_persisted_count": payload.get("runbooks_persisted_count"),
+        "runbook_errors": payload.get("runbook_errors") or [],
+        "validation_errors": payload.get("validation_errors") or [],
+    }
+
+
+def _log_reaction_response(
+    http_status: int,
+    event_window_count: int,
+    summary: dict[str, Any],
+    *,
+    is_error: bool = False,
+) -> None:
+    log = logger.error if is_error or _reaction_summary_has_errors(summary) else logger.info
+    log(
+        "http reaction response event_window_count=%s http_status=%s "
+        "pipeline_status=%s reports=%s failures=%s persisted_reports=%s "
+        "runbooks_generated=%s runbooks_persisted=%s persistence_errors=%s "
+        "runbook_errors=%s validation_errors=%s event_window_ids=%s",
+        event_window_count,
+        http_status,
+        summary.get("status"),
+        summary.get("reports_count"),
+        summary.get("failures_count"),
+        summary.get("persisted_rows_count"),
+        summary.get("runbooks_generated_count"),
+        summary.get("runbooks_persisted_count"),
+        _summarize_errors(summary.get("persistence_errors")),
+        _summarize_errors(summary.get("runbook_errors")),
+        _summarize_errors(summary.get("validation_errors")),
+        summary.get("requested_event_window_ids"),
+    )
+
+
+def _raise_for_reaction_response_errors(
+    http_status: int,
+    summary: dict[str, Any],
+) -> None:
+    if http_status >= 400:
+        raise RuntimeError(
+            f"reaction service returned HTTP {http_status}: "
+            f"{_reaction_response_error_detail(summary)}"
+        )
+    if _reaction_summary_has_errors(summary):
+        raise RuntimeError(
+            "reaction service completed with pipeline errors: "
+            f"{_reaction_response_error_detail(summary)}"
+        )
+
+
+def _reaction_summary_has_errors(summary: dict[str, Any]) -> bool:
+    if not summary:
+        return False
+    if summary.get("status") == "failed":
+        return True
+    for field_name in ("persistence_errors", "runbook_errors"):
+        if summary.get(field_name):
+            return True
+    generated = summary.get("runbooks_generated_count")
+    persisted = summary.get("runbooks_persisted_count")
+    if generated is not None and persisted is not None and generated != persisted:
+        return True
+    return False
+
+
+def _reaction_response_error_detail(
+    summary: dict[str, Any],
+    response_body: bytes | None = None,
+) -> str:
+    details: list[str] = []
+    for field_name in ("status", "persistence_errors", "runbook_errors"):
+        value = summary.get(field_name)
+        if value:
+            details.append(f"{field_name}={_summarize_errors(value)}")
+    generated = summary.get("runbooks_generated_count")
+    persisted = summary.get("runbooks_persisted_count")
+    if generated is not None and persisted is not None and generated != persisted:
+        details.append(f"runbook_count_mismatch={persisted}/{generated}")
+    if details:
+        return "; ".join(details)
+    if response_body:
+        return response_body[:500].decode("utf-8", errors="replace")
+    return "no response summary"
+
+
+def _summarize_errors(value: Any) -> Any:
+    if not isinstance(value, list):
+        return value
+    return [str(item)[:300] for item in value[:5]]
 
 
 class SupabaseReactionJobDispatcher:

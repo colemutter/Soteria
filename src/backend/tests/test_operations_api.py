@@ -19,8 +19,8 @@ class FakeQuery:
         self.calls.append(("select", columns))
         return self
 
-    def order(self, column: str):
-        self.calls.append(("order", column))
+    def order(self, column: str, **kwargs: Any):
+        self.calls.append(("order", (column, kwargs)))
         return self
 
     def limit(self, value: int):
@@ -221,6 +221,104 @@ class OperationsApiTest(unittest.TestCase):
 
         self.assertEqual(response.status_code, 422)
         self.assertIn("must include command steps", response.json()["detail"])
+
+    def test_get_runbooks_applies_filters_and_returns_operator_fields(self) -> None:
+        command_runbook = {
+            **self.catalog_backed_runbook(
+                status="generated",
+                source="report_pipeline_catalog",
+                metadata={
+                    "no_action_reason": None,
+                    "source_report": {"severity": "minor"},
+                    "human_review_required": True,
+                },
+            ),
+            "id": "runbook_123",
+            "risk_level": "moderate",
+            "created_at": "2026-06-21T00:00:00Z",
+            "updated_at": "2026-06-21T00:00:00Z",
+        }
+        self.client.queries["command_runbooks"] = FakeQuery([command_runbook])
+
+        response = TestClient(app).get(
+            "/api/runbooks"
+            "?report_id=report_123"
+            "&event_window_id=11111111-1111-1111-1111-111111111111"
+            "&satellite_id=22222222-2222-2222-2222-222222222222"
+            "&satellite_external_id=real-25544"
+            "&status=generated"
+            "&source=report_pipeline_catalog"
+            "&limit=25"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        runbooks = response.json()["runbooks"]
+        self.assertEqual(len(runbooks), 1)
+        self.assertEqual(
+            runbooks[0]["commands"][0]["rendered_script"],
+            "cmd('CFS_RADIO TO_ENABLE_OUTPUT')",
+        )
+        self.assertEqual(runbooks[0]["commands"][0]["verifier"]["target"], "CFS_RADIO")
+        self.assertEqual(
+            runbooks[0]["metadata"]["source_report"],
+            {"severity": "minor"},
+        )
+        self.assertEqual(
+            runbooks[0]["catalog_version"],
+            load_command_catalog().catalog_version,
+        )
+        self.assertEqual(
+            runbooks[0]["policy_version"],
+            "solar-weather-command-policy.20260621",
+        )
+        for expected_call in (
+            ("eq", ("report_id", "report_123")),
+            ("eq", ("event_window_id", "11111111-1111-1111-1111-111111111111")),
+            ("eq", ("satellite_id", "22222222-2222-2222-2222-222222222222")),
+            ("eq", ("satellite_external_id", "real-25544")),
+            ("eq", ("status", "generated")),
+            ("eq", ("source", "report_pipeline_catalog")),
+            ("limit", 25),
+        ):
+            self.assertIn(expected_call, self.client.queries["command_runbooks"].calls)
+
+    def test_get_runbook_by_id_returns_single_runbook(self) -> None:
+        self.client.queries["command_runbooks"] = FakeQuery(
+            [
+                {
+                    **self.catalog_backed_runbook(
+                        metadata={"no_action_reason": "Manual review only."},
+                        status="no_action",
+                        commands=[],
+                    ),
+                    "id": "runbook_123",
+                    "risk_level": "none",
+                }
+            ]
+        )
+
+        response = TestClient(app).get("/api/runbooks/runbook_123")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["runbook"]["id"], "runbook_123")
+        self.assertEqual(response.json()["runbook"]["commands"], [])
+        self.assertEqual(
+            response.json()["runbook"]["metadata"]["no_action_reason"],
+            "Manual review only.",
+        )
+        self.assertIn(
+            ("eq", ("id", "runbook_123")),
+            self.client.queries["command_runbooks"].calls,
+        )
+        self.assertIn(("limit", 1), self.client.queries["command_runbooks"].calls)
+
+    def test_get_runbook_by_id_returns_404_when_missing(self) -> None:
+        self.client.queries["command_runbooks"] = FakeQuery([])
+
+        response = TestClient(app).get("/api/runbooks/missing_runbook")
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json()["detail"], "Runbook not found")
 
     def test_upload_runbook_inserts_uploaded_status(self) -> None:
         response = TestClient(app).post(
